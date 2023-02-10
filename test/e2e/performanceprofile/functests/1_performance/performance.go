@@ -76,7 +76,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 		Expect(err).ToNot(HaveOccurred(), "cannot get profile by node labels %v", testutils.NodeSelectorLabels)
 	})
 
-	Context("Tuned CRs generated from profile", func() {
+	Context("Tuned CRs generated from profile", Label("release-critical"), func() {
 		tunedExpectedName := components.GetComponentName(testutils.PerformanceProfileName, components.ProfileNamePerformance)
 		It("[test_id:31748] Should have the expected name for tuned from the profile owner object", func() {
 			tunedList := &tunedv1.TunedList{}
@@ -116,7 +116,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 		})
 	})
 
-	Context("Pre boot tuning adjusted by tuned ", func() {
+	Context("Pre boot tuning adjusted by tuned ", Label("release-critical"), func() {
 
 		It("[test_id:31198] Should set CPU affinity kernel argument", func() {
 			for _, node := range workerRTNodes {
