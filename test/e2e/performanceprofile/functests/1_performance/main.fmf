@@ -1,5 +1,4 @@
 summary: Performance Management
 description: Basic Performance Profile test cases
-manual: true
-test: manual.md
-duration: 10s
+discover:
+  how: fmf

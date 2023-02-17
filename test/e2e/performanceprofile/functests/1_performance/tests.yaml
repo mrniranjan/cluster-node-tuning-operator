@@ -1,0 +1,15 @@
+/test/one:
+  summary: CPU Management
+  description: |
+    [test_id:28528][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU reservation on the node
+  test: ginkgo test/e2e/performanceprofile/functests/1_performance --  -ginkgo.focus 28528
+  path: test/e2e/performanceprofile/funtests/1_performance/cpu_management.go
+  duration: 10s
+  enabled: true
+  result: respect
+  tag: [cpu_management]
+  tier: 0
+
+summary: Performance Management
+description: Basic Performance Profile test cases
+
