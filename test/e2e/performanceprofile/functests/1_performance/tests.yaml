@@ -10,6 +10,14 @@
   tag: [cpu_management]
   tier: 0
 
-summary: Performance Management
-description: Basic Performance Profile test cases
-
+/test/two:
+  summary: Verify cpu affinity mask
+  description: |
+    [test_id:37862][crit:high][vendor:cnf-qe@redhat.com][level:acceptance]  Verify CPU affinity mask, CPU reservation and CPU isolation on worker node
+  test: ginkgo test/e2e/performanceprofile/functests/1_performance --  -ginkgo.focus 37862
+  path: test/e2e/performanceprofile/funtests/1_performance/cpu_management.go
+  duration: 10s
+  enabled: true
+  tag: [cpu_management]
+  tier: 0
+  

@@ -1,4 +1,2 @@
-summary: Performance Management
+summary: Sanity Performance  Profile tests
 description: Basic Performance Profile test cases
-discover:
-  how: fmf

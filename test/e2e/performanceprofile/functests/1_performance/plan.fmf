@@ -1,0 +1,5 @@
+discover:
+   how: fmf
+execute:
+   how: tmt
+id: 3082703d-dede-4cde-89dd-b741d5c35982
