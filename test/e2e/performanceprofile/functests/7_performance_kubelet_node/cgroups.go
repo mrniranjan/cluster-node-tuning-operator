@@ -99,7 +99,8 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 	})
 
 	AfterAll(func() {
-		By("Removing the crio fix workaround")
+		//Refer OCPBUGS-15102
+		By("Removing the crio fix workaround to have burstable pods access to all cpus")
 		err := testclient.Client.Delete(context.TODO(), mc)
 		Expect(err).ToNot(HaveOccurred(), "Unable to delete machine config crio fix")
 
