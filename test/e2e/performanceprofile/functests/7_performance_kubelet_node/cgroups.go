@@ -602,12 +602,12 @@ func getSystemdContent(options []*unit.UnitOption) (string, error) {
 // crioFixSystemdUnit create crio dropin systemd content to be executed
 func crioFixSystemdUnit() []*unit.UnitOption {
 	return []*unit.UnitOption{
-		&unit.UnitOption{
+		{
 			Section: "Service",
 			Name:    "Slice",
 			Value:   "crio.slice",
 		},
-		&unit.UnitOption{
+		{
 			Section: "Service",
 			Name:    "ExecStartPost",
 			Value:   "/usr/local/bin/fix-crio-aff.sh",
