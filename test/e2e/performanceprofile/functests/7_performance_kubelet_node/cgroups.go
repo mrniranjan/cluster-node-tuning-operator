@@ -81,10 +81,11 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 		performanceMCP, err = mcps.GetByProfile(profile)
 		Expect(err).ToNot(HaveOccurred())
 
+		// Refer OCPBUGS-15102
+		By("Applying Crio fix to make sure all burstable pods use all the cpus")
 		mc, err = createMachineConfig(profile)
 		Expect(err).ToNot(HaveOccurred(), "Unable to create machine config file for crio fix")
 
-		By("Applying Crio fix")
 		err = testclient.Client.Create(context.TODO(), mc)
 		Expect(err).ToNot(HaveOccurred(), "Unable to apply machine config for crio fix")
 
@@ -274,7 +275,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				testpod.Spec.NodeSelector = map[string]string{testutils.LabelHostname: workerRTNode.Name}
 				err = testclient.Client.Create(context.TODO(), testpod)
 				Expect(err).ToNot(HaveOccurred())
-				err = pods.WaitForCondition(testpod, corev1.PodReady, corev1.ConditionTrue, 5*time.Minute)
+				testpod, err = pods.WaitForCondition(client.ObjectKeyFromObject(testpod), corev1.PodConditionType(corev1.PodReady), corev1.ConditionTrue, 5*time.Minute)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(testpod.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
 				By("Getting the container cpuset.cpus cgroup")
@@ -291,9 +292,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				cmd := []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
 				output, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
-				cpusOfPods, err := cpuset.Parse(output)
-				targetCpus := cpusOfPods.ToSlice()
-				testlog.Infof("%v pod is using %s cpus", testpod.Name, targetCpus)
+				testlog.Infof("%v pod is using %v cpus", testpod.Name, output)
 				ovnPod, err := getOvnPod(workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
 				ovnContainers, err := getOvnPodContainers(&ovnPod)
@@ -326,7 +325,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				testpod1.Spec.NodeSelector = map[string]string{testutils.LabelHostname: workerRTNode.Name}
 				err = testclient.Client.Create(context.TODO(), testpod1)
 				Expect(err).ToNot(HaveOccurred())
-				err = pods.WaitForCondition(testpod1, corev1.PodReady, corev1.ConditionTrue, 5*time.Minute)
+				testpod1, err = pods.WaitForCondition(client.ObjectKeyFromObject(testpod1), corev1.PodConditionType(corev1.PodReady), corev1.ConditionTrue, 5*time.Minute)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(testpod1.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
 				By("Getting the container cpuset.cpus cgroup")
@@ -355,7 +354,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				testpod2.Spec.NodeSelector = map[string]string{testutils.LabelHostname: workerRTNode.Name}
 				err = testclient.Client.Create(context.TODO(), testpod2)
 				Expect(err).ToNot(HaveOccurred())
-				err = pods.WaitForCondition(testpod2, corev1.PodReady, corev1.ConditionTrue, 5*time.Minute)
+				testpod2, err = pods.WaitForCondition(client.ObjectKeyFromObject(testpod2), corev1.PodConditionType(corev1.PodReady), corev1.ConditionTrue, 5*time.Minute)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(testpod1.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
 				By("Getting the container cpuset.cpus cgroup")
@@ -700,24 +699,6 @@ func getOVSServicesPid(workerNode *corev1.Node) ([]string, error) {
 	return pids, nil
 }
 
-/*// getCpuOfOvsServices returns cpus used by the ovs services ovs-vswitchd and ovs-dbserver
-func getCpuOfOvsServices(procStatus string) string {
-	scanner := bufio.NewScanner(strings.NewReader(procStatus))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "Cpus_allowed_list") {
-			fields := strings.Fields(line)
-			fmt.Println("fileds = ", fields)
-			fmt.Println("length = ", len(fields))
-			if len(fields) > 1 {
-				value := fields[1]
-				return value
-			}
-		}
-	}
-	return ""
-        }*/
-
 func newDeployment() *appsv1.Deployment {
 	var replicas int32 = 2
 	dp := &appsv1.Deployment{
@@ -750,7 +731,7 @@ func newDeployment() *appsv1.Deployment {
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
 									corev1.ResourceMemory: resource.MustParse("500Mi"),
-									corev1.ResourceCPU:    resource.MustParse("2"),
+									corev1.ResourceCPU:    resource.MustParse("1"),
 								},
 							},
 						},
