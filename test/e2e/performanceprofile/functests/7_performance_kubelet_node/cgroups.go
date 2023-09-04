@@ -3,6 +3,7 @@ package __performance_kubelet_node_test
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -21,8 +22,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"embed"
 
 	"github.com/coreos/go-systemd/unit"
 	igntypes "github.com/coreos/ignition/v2/config/v3_2/types"
