@@ -66,7 +66,7 @@ var (
 var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 	var onlineCPUSet cpuset.CPUSet
 
-	testutils.CustomBeforeAll(func() {
+	BeforeAll(func() {
 		workerRTNodes, err := nodes.GetByLabels(testutils.NodeSelectorLabels)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -125,7 +125,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 
 	Describe("[rfe_id: 64006][Dynamic OVS Pinning]", Ordered, func() {
 		Context("[Performance Profile applied]", func() {
-			It("[test_id: 64097]Activation file is created", Label("t1"), func() {
+			It("[test_id:64097] Activation file is created", func() {
 				cmd := []string{"ls", activation_file}
 				out, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "file %s doesn't exist ", activation_file)
@@ -136,7 +136,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			BeforeEach(func() {
 				initialProfile = profile.DeepCopy()
 			})
-			It("[test_id: 64099] Activation file doesn't get deleted", Label("t2"), func() {
+			It("[test_id:64099] Activation file doesn't get deleted", func() {
 				performanceMCP, err := mcps.GetByProfile(profile)
 				Expect(err).ToNot(HaveOccurred())
 				policy := "best-effort"
@@ -189,7 +189,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			})
 		})
 	})
-	Describe("Verification of cgroup layout on the worker node", Label("t3"), func() {
+	Describe("Verification of cgroup layout on the worker node", func() {
 		It("Verify OVS was placed to its own cgroup", func() {
 			By("checking the cgroup process list")
 			cmd := []string{"cat", "/rootfs/sys/fs/cgroup/cpuset/ovs.slice/cgroup.procs"}
@@ -213,7 +213,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ovsLoadBalancing).To(Equal("0"))
 		})
-		It("[test_id: 64089]ovs-vswitchd and ovsdb-server are under ovs.slice cgroup", func() {
+		It("[test_id:64098] ovs-vswitchd and ovsdb-server are under ovs.slice cgroup", func() {
 			processCgroups := "cpuset:/ovs.slice"
 			pidList, err := getOVSServicesPid(workerRTNode)
 			Expect(err).ToNot(HaveOccurred())
@@ -237,7 +237,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			BeforeEach(func() {
 				initialProfile = profile.DeepCopy()
 			})
-			It("[test_id: 64100] matches with ovs process affinity", Label("t4"), func() {
+			It("[test_id:64100] matches with ovs process affinity", func() {
 				ovnPod, err := getOvnPod(workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
 				ovnContainersids, err := getOvnPodContainers(&ovnPod)
@@ -260,7 +260,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				}
 			})
 
-			It("[test_id: 64101]: Creating gu pods modifies affinity of ovs", Label("t5"), func() {
+			It("[test_id:64101] Creating gu pods modifies affinity of ovs", func() {
 				var testpod *corev1.Pod
 				var err error
 				testpod = pods.GetTestPod()
@@ -310,7 +310,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				deleteTestPod(testpod)
 			})
 
-			It("[test_id: 64102]: Creating and remove gu pods to verify affinity of ovs are changed appropriately", Label("t6"), func() {
+			It("[test_id:64102] Creating and remove gu pods to verify affinity of ovs are changed appropriately", func() {
 				var testpod1, testpod2 *corev1.Pod
 				var err error
 				testpod1 = pods.GetTestPod()
@@ -406,7 +406,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				deleteTestPod(testpod2)
 			})
 
-			It("[test_id: OCP-64103] ovs process affinity still excludes guaranteed pods after reboot", func() {
+			It("[test_id:64103] ovs process affinity still excludes guaranteed pods after reboot", func() {
 				// create a deployment to deploy gu pods
 				dp := newDeployment()
 				err := testclient.Client.Create(context.TODO(), dp)
