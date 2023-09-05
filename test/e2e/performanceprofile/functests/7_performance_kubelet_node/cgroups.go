@@ -63,7 +63,7 @@ var (
 	Scripts embed.FS
 )
 
-var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
+var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), func() {
 	var onlineCPUSet cpuset.CPUSet
 
 	BeforeAll(func() {
@@ -249,6 +249,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				testlog.Infof("Cpus used by ovn Containers are %s", cpus)
 				pidList, err := getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
+
 				for _, pid := range pidList {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("grep Cpus_allowed_list /proc/%s/status | awk '{print $2}'", pid)}
 					cpusOfovsServices, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -272,6 +273,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 						corev1.ResourceMemory: resource.MustParse("200Mi"),
 					},
 				}
+
 				testpod.Spec.NodeSelector = map[string]string{testutils.LabelHostname: workerRTNode.Name}
 				err = testclient.Client.Create(context.TODO(), testpod)
 				Expect(err).ToNot(HaveOccurred())
@@ -281,6 +283,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				By("Getting the container cpuset.cpus cgroup")
 				containerID, err := pods.GetContainerIDByName(testpod, "test")
 				Expect(err).ToNot(HaveOccurred())
+
 				containerCgroup := ""
 				Eventually(func() string {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("find /rootfs/sys/fs/cgroup/cpuset/ -name *%s*", containerID)}
@@ -288,6 +291,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 					Expect(err).ToNot(HaveOccurred())
 					return containerCgroup
 				}, (cluster.ComputeTestTimeout(30*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
+
 				By("Get cpus used by the pod")
 				cmd := []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
 				output, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -300,6 +304,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				cpus := getCpusUsedByOvnContainer(ovnContainers[0])
 				pidList, err := getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
+
 				for _, pid := range pidList {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("grep Cpus_allowed_list /proc/%s/status | awk '{print $2}'", pid)}
 					cpusOfovServices, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -311,7 +316,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				deleteTestPod(testpod)
 			})
 
-			It("[test_id:64102] Creating and remove gu pods to verify affinity of ovs are changed appropriately", func() {
+			It("[test_id:64102] Create and remove gu pods to verify affinity of ovs are changed appropriately", func() {
 				var testpod1, testpod2 *corev1.Pod
 				var err error
 				testpod1 = pods.GetTestPod()
@@ -322,6 +327,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 						corev1.ResourceMemory: resource.MustParse("200Mi"),
 					},
 				}
+
 				testpod1.Spec.NodeSelector = map[string]string{testutils.LabelHostname: workerRTNode.Name}
 				err = testclient.Client.Create(context.TODO(), testpod1)
 				Expect(err).ToNot(HaveOccurred())
@@ -331,6 +337,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				By("Getting the container cpuset.cpus cgroup")
 				containerID, err := pods.GetContainerIDByName(testpod1, "test")
 				Expect(err).ToNot(HaveOccurred())
+
 				containerCgroup := ""
 				Eventually(func() string {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("find /rootfs/sys/fs/cgroup/cpuset/ -name *%s*", containerID)}
@@ -344,6 +351,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				Expect(err).ToNot(HaveOccurred())
 				cpus, err := cpuset.Parse(output)
 				testlog.Infof("cpus used by pod %v is %v", testpod1.Name, cpus)
+
 				testpod2 = pods.GetTestPod()
 				testpod2.Namespace = testutils.NamespaceTesting
 				testpod2.Spec.Containers[0].Resources = corev1.ResourceRequirements{
@@ -368,6 +376,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 					Expect(err).ToNot(HaveOccurred())
 					return containerCgroup
 				}, (cluster.ComputeTestTimeout(30*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
+
 				By("Get cpus used by container")
 				cmd = []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
 				output, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -382,6 +391,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				testlog.Infof("cpus used by ovn kube node pods %v", ovnContainerCpus)
 				pidList, err := getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
+
 				for _, pid := range pidList {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("grep Cpus_allowed_list /proc/%s/status | awk '{print $2}'", pid)}
 					cpusOfovServices, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -393,6 +403,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				}
 				testlog.Infof("Deleting pod %v", testpod1.Name)
 				deleteTestPod(testpod1)
+
 				ovnPod, err = getOvnPod(workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
 				ovnContainers, err = getOvnPodContainers(&ovnPod)
@@ -414,6 +425,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			})
 
 			It("[test_id:64103] ovs process affinity still excludes guaranteed pods after reboot", func() {
+
 				// create a deployment to deploy gu pods
 				dp := newDeployment()
 				testNode := make(map[string]string)
@@ -421,12 +433,14 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				dp.Spec.Template.Spec.NodeSelector = testNode
 				err := testclient.Client.Create(context.TODO(), dp)
 				Expect(err).ToNot(HaveOccurred(), "Unable to create Deployment")
+
 				defer func() {
 					// delete deployment
 					testlog.Infof("Deleting Deployment %v", dp.Name)
 					err := testclient.Client.Delete(context.TODO(), dp)
 					Expect(err).ToNot(HaveOccurred())
 				}()
+
 				// Check the cpus of ovn kube node pods and ovs services
 				ovnPod, err := getOvnPod(workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
@@ -445,6 +459,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 						testlog.Error(err.Error())
 					}
 				}
+
 				testlog.Info("Rebooting the node")
 				// reboot the node, for that we change the numa policy to best-effort
 				// Note: this is used only to trigger reboot
@@ -460,12 +475,14 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 				profile.Spec.NUMA = &performancev2.NUMA{
 					TopologyPolicy: &policy,
 				}
+
 				By("Updating the performance profile")
 				profiles.UpdateWithRetry(profile)
 				By("Applying changes in performance profile and waiting until mcp will start updating")
 				mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdating, corev1.ConditionTrue)
 				By("Waiting for MCP being updated")
 				mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
+
 				// Check the cpus of ovn kube node pods and ovs services
 				ovnPod, err = getOvnPod(workerRTNode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
