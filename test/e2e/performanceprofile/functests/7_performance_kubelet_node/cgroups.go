@@ -63,7 +63,7 @@ var (
 	Scripts embed.FS
 )
 
-var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), func() {
+var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 	var onlineCPUSet cpuset.CPUSet
 
 	BeforeAll(func() {
@@ -413,7 +413,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 				deleteTestPod(testpod2)
 			})
 
-			It("[test_id:64103] ovs process affinity still excludes guaranteed pods after reboot", Label("t2"), func() {
+			It("[test_id:64103] ovs process affinity still excludes guaranteed pods after reboot", func() {
 				// create a deployment to deploy gu pods
 				dp := newDeployment()
 				testNode := make(map[string]string)
