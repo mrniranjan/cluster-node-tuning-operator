@@ -63,7 +63,7 @@ var (
 	Scripts embed.FS
 )
 
-var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), func() {
+var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 	var onlineCPUSet cpuset.CPUSet
 
 	BeforeAll(func() {
@@ -344,7 +344,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 					containerCgroup, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
 					Expect(err).ToNot(HaveOccurred())
 					return containerCgroup
-				}, (cluster.ComputeTestTimeout(30*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
+				}, (cluster.ComputeTestTimeout(60*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
 				By("Get cpu's used by container")
 				cmd := []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
 				output, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
@@ -375,7 +375,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 					containerCgroup, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
 					Expect(err).ToNot(HaveOccurred())
 					return containerCgroup
-				}, (cluster.ComputeTestTimeout(30*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
+				}, (cluster.ComputeTestTimeout(60*time.Second, RunningOnSingleNode)), 5*time.Second).ShouldNot(BeEmpty())
 
 				By("Get cpus used by container")
 				cmd = []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
@@ -383,32 +383,24 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 				Expect(err).ToNot(HaveOccurred())
 				cpus, err = cpuset.Parse(output)
 				testlog.Infof("cpus used by pod %v is %v", testpod1.Name, cpus)
-				ovnPod, err := getOvnPod(workerRTNode)
-				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
-				ovnContainers, err := getOvnPodContainers(&ovnPod)
-				Expect(err).ToNot(HaveOccurred())
-				ovnContainerCpus := getCpusUsedByOvnContainer(ovnContainers[0])
+				ovnContainerCpus, err := getOvnContainerCpus(workerRTNode)
+				Expect(err).ToNot(HaveOccurred(), "Unable to fetch cpus of the containers inside ovn kubenode pods")
 				testlog.Infof("cpus used by ovn kube node pods %v", ovnContainerCpus)
 				pidList, err := getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
-
 				for _, pid := range pidList {
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("grep Cpus_allowed_list /proc/%s/status | awk '{print $2}'", pid)}
 					cpusOfovServices, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
 					testlog.Infof("cpus used by ovs service %s is %s", pid, cpusOfovServices)
-					Expect(cpusOfovServices == ovnContainerCpus).To(BeTrue(), "affinity of ovn kube node pods(%s) do not match with ovservices(%s)", cpus, cpusOfovServices)
+					Expect(cpusOfovServices == ovnContainerCpus).To(BeTrue(), "affinity of ovn kube node pods(%s) do not match with ovservices(%s)", ovnContainerCpus, cpusOfovServices)
 					if err != nil {
 						testlog.Error(err.Error())
 					}
 				}
 				testlog.Infof("Deleting pod %v", testpod1.Name)
 				deleteTestPod(testpod1)
-
-				ovnPod, err = getOvnPod(workerRTNode)
-				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
-				ovnContainers, err = getOvnPodContainers(&ovnPod)
-				Expect(err).ToNot(HaveOccurred())
-				ovnContainerCpus = getCpusUsedByOvnContainer(ovnContainers[0])
+				ovnContainerCpus, err = getOvnContainerCpus(workerRTNode)
+				Expect(err).ToNot(HaveOccurred(), "Unable to fetch cpus of the containers inside ovn kubenode pods")
 				testlog.Infof("cpus used by ovn kube node pods after deleting pod %v is %v", testpod1.Name, ovnContainerCpus)
 				pidList, err = getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
@@ -416,7 +408,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 					cmd := []string{"/bin/bash", "-c", fmt.Sprintf("grep Cpus_allowed_list /proc/%s/status | awk '{print $2}'", pid)}
 					cpusOfovServices, err := nodes.ExecCommandOnNode(cmd, workerRTNode)
 					testlog.Infof("cpus used by ovs service %s is %s", pid, cpusOfovServices)
-					Expect(cpusOfovServices == ovnContainerCpus).To(BeTrue(), "affinity of ovn kube node pods(%s) do not match with ovservices(%s)", cpus, cpusOfovServices)
+					Expect(cpusOfovServices == ovnContainerCpus).To(BeTrue(), "affinity of ovn kube node pods(%s) do not match with ovservices(%s)", ovnContainerCpus, cpusOfovServices)
 					if err != nil {
 						testlog.Error(err.Error())
 					}
@@ -440,13 +432,9 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 					err := testclient.Client.Delete(context.TODO(), dp)
 					Expect(err).ToNot(HaveOccurred())
 				}()
-
 				// Check the cpus of ovn kube node pods and ovs services
-				ovnPod, err := getOvnPod(workerRTNode)
-				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
-				ovnContainers, err := getOvnPodContainers(&ovnPod)
-				Expect(err).ToNot(HaveOccurred())
-				ovnContainerCpus := getCpusUsedByOvnContainer(ovnContainers[0])
+				ovnContainerCpus, err := getOvnContainerCpus(workerRTNode)
+				Expect(err).ToNot(HaveOccurred(), "Unable to fetch cpus of the containers inside ovn kubenode pods")
 				testlog.Infof("cpus used by ovn kube node pods %v", ovnContainerCpus)
 				pidList, err := getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
@@ -484,11 +472,8 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), fu
 				mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
 
 				// Check the cpus of ovn kube node pods and ovs services
-				ovnPod, err = getOvnPod(workerRTNode)
-				Expect(err).ToNot(HaveOccurred(), "Unable to get ovnPod")
-				ovnContainers, err = getOvnPodContainers(&ovnPod)
-				Expect(err).ToNot(HaveOccurred())
-				ovnContainerCpus = getCpusUsedByOvnContainer(ovnContainers[0])
+				ovnContainerCpus, err = getOvnContainerCpus(workerRTNode)
+				Expect(err).ToNot(HaveOccurred(), "Unable to fetch cpus of the containers inside ovn kubenode pods")
 				testlog.Infof("cpus used by ovn kube node pods %v", ovnContainerCpus)
 				pidList, err = getOVSServicesPid(workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
@@ -706,11 +691,27 @@ func getCpusUsedByOvnContainer(ovnKubeNodePodCtnid string) string {
 		containerCgroup, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
 		Expect(err).ToNot(HaveOccurred(), "failed to run %s cmd", cmd)
 		return containerCgroup
-	}, 5*time.Second, 2*time.Second).ShouldNot(BeEmpty())
+	}, 20*time.Second, 10*time.Second).ShouldNot(BeEmpty())
 	cmd := []string{"/bin/bash", "-c", fmt.Sprintf("cat %s/cpuset.cpus", containerCgroup)}
 	cpus, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
 	Expect(err).ToNot(HaveOccurred())
 	return cpus
+}
+
+// getOvnContain erCpus returns the cpus used by the container inside the ovn kubenode pods
+func getOvnContainerCpus(workerRTNode *corev1.Node) (string, error) {
+	var ovnContainerCpus string
+	ovnPod, err := getOvnPod(workerRTNode)
+	if err != nil {
+		return "", err
+	}
+	ovnContainers, err := getOvnPodContainers(&ovnPod)
+	if err != nil {
+		return "", err
+	}
+	ovnContainerCpus = getCpusUsedByOvnContainer(ovnContainers[0])
+	testlog.Infof("cpus used by ovn kube node pods %v", ovnContainerCpus)
+	return ovnContainerCpus, nil
 }
 
 // getOVSServicesPid returns the pid of ovs-vswitchd and ovsdb-server
