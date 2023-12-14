@@ -37,7 +37,7 @@ import (
 
 const minRequiredCPUs = 8
 
-var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
+var _ = Describe("[performance] Cgroups and affinity", Ordered, Label("ovs"), func() {
 	const (
 		activation_file string = "/rootfs/var/lib/ovn-ic/etc/enable_dynamic_cpu_affinity"
 	)
@@ -48,9 +48,11 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 		profile, initialProfile *performancev2.PerformanceProfile
 		performanceMCP          string
 		ovsSliceCgroup          string
+		cpusetCtlrPath          string
 	)
 
 	BeforeAll(func() {
+		fmt.Println("!!!!!!!!!! we are in Before all !!!!!!!!!!!")
 		if discovery.Enabled() && testutils.ProfileNotFound {
 			Skip("Discovery mode enabled, performance profile not found")
 		}
@@ -68,7 +70,15 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// TODO: This path is not compatible with cgroupv2.
-		ovsSliceCgroup = "/rootfs/sys/fs/cgroup/cpuset/ovs.slice/"
+		cgroupFilesystem, err := nodes.GetCgroupFs(workerRTNode)
+		fmt.Println("@@@@@@@@@@@@ cgroup file system @@@@@@@@@@@@@@@@@", cgroupFilesystem)
+		if cgroupFilesystem == "tmpfs" {
+			cpusetCtlrPath = "/rootfs/sys/fs/cgroup/cpuset"
+		} else {
+			cpusetCtlrPath = "/rootfs/sys/fs/cgroup/"
+		}
+		ovsSliceCgroup = filepath.Join(cpusetCtlrPath, "ovs.slice")
+
 	})
 
 	BeforeEach(func() {
@@ -157,13 +167,26 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 		chkOvsCgrpProcs := func(node *corev1.Node) (string, error) {
 			testlog.Info("Verify cgroup.procs is not empty")
 			// TODO: This path is not compatible with cgroupv2.
-			ovsCgroupPath := filepath.Join(ovsSliceCgroup, "cgroup.procs")
+			var ovsCgroupPath, cgroupFilesystem string
+			fmt.Println("!!!!!!!! cgroup file system !!!!!!!!!!!!!!", cgroupFilesystem)
+			cgroupFilesystem, _ = nodes.GetCgroupFs(node)
+			if cgroupFilesystem == "cgroup2fs" {
+				ovsCgroupPath = filepath.Join(ovsSliceCgroup, "ovs-vswitchd.service/cgroup.procs")
+			} else {
+				ovsCgroupPath = filepath.Join(ovsSliceCgroup, "cgroup.procs")
+			}
 			cmd := []string{"cat", ovsCgroupPath}
 			return nodes.ExecCommandOnNode(cmd, node)
 		}
 		chkOvsCgrpCpuset := func(node *corev1.Node) (string, error) {
 			// TODO: This path is not compatible with cgroupv2.
-			ovsCgroupPath := filepath.Join(ovsSliceCgroup, "cpuset.cpus")
+			var ovsCgroupPath string
+			cgroupFilesystem, _ := nodes.GetCgroupFs(workerRTNode)
+			if cgroupFilesystem == "cgroup2fs" {
+				ovsCgroupPath = filepath.Join(ovsSliceCgroup, "cpuset.cpus.effective")
+			} else {
+				ovsCgroupPath = filepath.Join(ovsSliceCgroup, "cpuset.cpus")
+			}
 			cmd := []string{"cat", ovsCgroupPath}
 			return nodes.ExecCommandOnNode(cmd, node)
 		}
@@ -176,7 +199,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			return nodes.ExecCommandOnNode(cmd, node)
 		}
 
-		It("[test_id:64098] Verify cgroup layout on worker node", func() {
+		It("[test_id:64098] Verify cgroup layout on worker node", Label("cgroupbug"), func() {
 			// check cgroups.procs
 			result, err := chkOvsCgrpProcs(workerRTNode)
 			Expect(err).ToNot(HaveOccurred())
@@ -187,10 +210,12 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, func() {
 			ovsCPUSet, err := cpuset.Parse(result)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ovsCPUSet).To(Equal(onlineCPUSet))
-
-			result, err = chkOvsCgroupLoadBalance(workerRTNode)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(result).To(Equal("0"))
+			cgroupFilesystem, err := nodes.GetCgroupFs(workerRTNode)
+			if cgroupFilesystem == "tmpfs" {
+				result, err = chkOvsCgroupLoadBalance(workerRTNode)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal("0"))
+			}
 		})
 	})
 
@@ -534,10 +559,14 @@ func getOvnPodContainers(ovnKubeNodePod *corev1.Pod) ([]string, error) {
 func getCpusUsedByOvnContainer(workerRTNode *corev1.Node, ovnKubeNodePodCtnid string) string {
 	var cpus string
 	var err error
-	var containerCgroup = ""
+	var containerCgroup, cpusetCtlrPath = "", ""
+	cgroupFilesystem, _ := nodes.GetCgroupFs(workerRTNode)
+	if cgroupFilesystem == "cgroup2fs" {
+		cpusetCtlrPath = "/rootfs/sys/fs/cgroup"
+	}
 	Eventually(func() string {
 		// TODO: This path is not compatible with cgroupv2.
-		cmd := []string{"/bin/bash", "-c", fmt.Sprintf("find /rootfs/sys/fs/cgroup/cpuset/ -name '*%s*'", ovnKubeNodePodCtnid)}
+		cmd := []string{"/bin/bash", "-c", fmt.Sprintf("find %s -name '*crio-%s*'", cpusetCtlrPath, ovnKubeNodePodCtnid)}
 		containerCgroup, err = nodes.ExecCommandOnNode(cmd, workerRTNode)
 		Expect(err).ToNot(HaveOccurred(), "failed to run %s cmd", cmd)
 		return containerCgroup
@@ -574,11 +603,28 @@ func getOvnContainerCpus(workerRTNode *corev1.Node) (string, error) {
 // getOVSServicesPid returns the pid of ovs-vswitchd and ovsdb-server
 func getOVSServicesPid(workerNode *corev1.Node) ([]string, error) {
 	var pids []string
-	// TODO: This path is not compatible with cgroupv2.
-	cmd := []string{"cat", "/rootfs/sys/fs/cgroup/cpuset/ovs.slice/cgroup.procs"}
-	output, err := nodes.ExecCommandOnNode(cmd, workerNode)
-	pids = strings.Split(string(output), "\n")
-	return pids, err
+	var ovsServices = []string{"ovs-vswitchd.service", "ovsdb-server.service"}
+	cgroupFilesystem, _ := nodes.GetCgroupFs(workerNode)
+	if cgroupFilesystem == "cgroup2fs" {
+		for _, service := range ovsServices {
+			procsPath := fmt.Sprintf("/rootfs/sys/fs/cgroup/ovs.slice/%s/cgroup.procs", service)
+			cmd := []string{"cat", procsPath}
+			processIds, err := nodes.ExecCommandOnNode(cmd, workerNode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch pids for %s: %v", service, err)
+			}
+			output := strings.Split(strings.TrimSpace(string(processIds)), "\n")
+			pids = append(pids, output...)
+		}
+	} else {
+		cmd := []string{"cat", "/rootfs/sys/fs/cgroup/cpuset/ovs.slice/cgroup.procs"}
+		output, err := nodes.ExecCommandOnNode(cmd, workerNode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch pids: %v", err)
+		}
+		pids = strings.Split(string(output), "\n")
+	}
+	return pids, nil
 }
 
 // getCPUMaskForPids returns a slice containing cpu affinity of ovs services
