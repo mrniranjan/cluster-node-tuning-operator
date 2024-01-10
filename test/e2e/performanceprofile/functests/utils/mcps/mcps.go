@@ -315,7 +315,8 @@ func EnableCrun(name string, perfprofile *performancev2.PerformanceProfile, prof
 	return ctrcfg1
 }
 
-func GetValueFromCrioConfig(workercnfNode *corev1.Node, key, confPath string) ([]string, error) {
+func GetValueFromCrioConfig(workercnfNode *corev1.Node, key string) ([]string, error) {
+	confPath := "/etc/crio/crio.conf.d/99-runtimes.conf"
 	out, err := nodes.ExecCommandOnMachineConfigDaemon(workercnfNode, []string{"cat", filepath.Join("/rootfs", confPath)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch values from %s: %w", confPath, err)
