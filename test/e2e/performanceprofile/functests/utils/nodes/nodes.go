@@ -62,6 +62,12 @@ type NodeInterface struct {
 	defRoute bool
 }
 
+type CpuManagerStateInfo struct {
+	PolicyName    string `json:"policyName"`
+	DefaultCPUSet string `json:"defaultCpuSet"`
+	Checksum      int    `json:"checksum"`
+}
+
 // GetByRole returns all nodes with the specified role
 func GetByRole(role string) ([]corev1.Node, error) {
 	selector, err := labels.Parse(fmt.Sprintf("%s/%s=", testutils.LabelRole, role))
@@ -577,4 +583,21 @@ func GetCgroupFs(node *corev1.Node) (string, error) {
 	}
 	cgroupFs := strings.TrimSpace(string(version))
 	return cgroupFs, nil
+}
+
+// CpuManagerCpuSet returns defaultCpuSet from /var/lib/kubelet/cpu_manager_stat file
+func CpuManagerCpuSet(node *corev1.Node) (cpuset.CPUSet, error) {
+	stateFilePath := "/var/lib/kubelet/cpu_manager_state"
+	var stateData CpuManagerStateInfo
+	cmd := []string{"/bin/bash", "-c", fmt.Sprintf("chroot /rootfs cat %s", stateFilePath)}
+	data, err := ExecCommandOnMachineConfigDaemon(node, cmd)
+	err = json.Unmarshal(data, &stateData)
+	if err != nil {
+		return cpuset.New(), err
+	}
+	nodeCpuSet, err := cpuset.Parse(stateData.DefaultCPUSet)
+	if err != nil {
+		return cpuset.New(), err
+	}
+	return nodeCpuSet, err
 }
