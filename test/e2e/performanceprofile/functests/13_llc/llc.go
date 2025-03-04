@@ -215,8 +215,13 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 	Context("Functional Tests", func() {
 		BeforeAll(func() {
 			var cpuGroupSize int
-			ctx := context.Background()
+			var numaCoreSiblings map[int]map[int][]int
+			var reserved, isolated []string
+			var policy = "single-numa-node"
 			
+			profile, err := profiles.GetByNodeLabels(testutils.NodeSelectorLabels)
+			Expect(err).ToNot(HaveOccurred())
+			ctx := context.Background()
 			for _, cnfnode := range workerRTNodes {
 				numaInfo, err := nodes.GetNumaNodes(context.TODO(), &cnfnode)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get numa information from the node")
@@ -231,6 +236,48 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 					Skip("This test requires systems where L3 cache is shared amount subset of cpus")
 				}
 			}
+			
+			// Modify the profile such that we give 1 whole ccx to reserved cpus
+			By("Modifying the profile")
+			for _, node := range workerRTNodes {
+				numaCoreSiblings, err = nodes.GetCoreSiblings(context.TODO(), &node)
+				Expect(err).ToNot(HaveOccurred())
+			}
+			// Get cpu siblings from core 0-7
+			// Reason: The default profile that is applied generally take 4 cpus and those 4 cpus
+			// are taken without taking in to account the cpu topology.
+			// By reserving the first 8 core siblings to Reserved cpus, we will not have to worry
+			// about polluting cacheId used for Reserved cpus
+			for reservedCores := 0; reservedCores < 8; reservedCores++ {
+				cpusiblings := nodes.GetAndRemoveCpuSiblingsFromMap(numaCoreSiblings, reservedCores)
+				reserved = append(reserved, cpusiblings...)
+			}
+			reservedCpus := strings.Join(reserved, ",")
+			for key := range numaCoreSiblings {
+				for k := range numaCoreSiblings[key] {
+					cpusiblings := nodes.GetAndRemoveCpuSiblingsFromMap(numaCoreSiblings, k)
+					isolated = append(isolated, cpusiblings...)
+				}
+			}
+			isolatedCpus := strings.Join(isolated, ",")
+			reservedSet := performancev2.CPUSet(reservedCpus)
+			isolatedSet := performancev2.CPUSet(isolatedCpus)
+			profile.Spec.CPU = &performancev2.CPU{
+				Reserved: &reservedSet,
+				Isolated: &isolatedSet,
+			}
+			profile.Spec.NUMA = &performancev2.NUMA{
+				TopologyPolicy: &policy,
+			}
+			By("Updating Performance profile")
+			profiles.UpdateWithRetry(profile)
+
+			By(fmt.Sprintf("Applying changes in performance profile and waiting until %s will start updating", poolName))
+			profilesupdate.WaitForTuningUpdating(ctx, profile)
+
+			By(fmt.Sprintf("Waiting when %s finishes updates", poolName))
+			profilesupdate.WaitForTuningUpdated(ctx, profile)
+			
 			testNS := *namespaces.TestingNamespace
 			Expect(testclient.DataPlaneClient.Create(ctx, &testNS)).ToNot(HaveOccurred())
 			DeferCleanup(func() {
@@ -241,8 +288,11 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 		
 		It("[test_id:77725] Align Guaranteed pod requesting 16 cpus to the whole CCX if available", Label("llc1"), func() {
 			ctx := context.Background()
+			targetNode := workerRTNodes[0]
 			cpusetCfg := &controller.CpuSet{}
 			DeploymentName := "test-deployment"
+			testNode := make(map[string]string)
+			testNode["kubernetes.io/hostname"] = targetNode.Name
 			By("Creating a deployment with one pod asking for whole L3 cache group")
 			rl := &corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("16"),
@@ -251,7 +301,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			p := makePod(testutils.NamespaceTesting, withRequests(rl),withLimits(rl))
 			dp := deployments.Make(DeploymentName, testutils.NamespaceTesting,
 				deployments.WithPodTemplate(p),
-				deployments.WithNodeSelector(testutils.NodeSelectorLabels))
+				deployments.WithNodeSelector(testNode))
 			Expect(testclient.Client.Create(ctx, dp)).ToNot(HaveOccurred())
 			podList := &corev1.PodList{}
 			listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
@@ -268,7 +318,8 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
 			Expect(err).ToNot(HaveOccurred())
 			fmt.Println(cgroupCpuset.List())
-			uncoreCpuGroups := UnCoreCacheCpus(&workerRTNodes[0])
+			
+			uncoreCpuGroups := UnCoreCacheCpus(&targetNode)
 			cpus, err := uncoreCpuGroups(cgroupCpuset.List()[0])
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cgroupCpuset).To(Equal(cpus))
