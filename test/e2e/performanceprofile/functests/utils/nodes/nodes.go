@@ -547,3 +547,16 @@ func CpuManagerCpuSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, er
 	fmt.Println("cpuset = ", nodeCpuSet.String())
 	return nodeCpuSet, err
 }
+
+func UncoreCpus(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, error) {
+	cpuId := 1
+	var err error
+	cacheSizeFile := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/cache/index3/shared_cpu_list", cpuId)
+	cmd := []string{"cat", cacheSizeFile}
+	output, err := ExecCommand(ctx, node, cmd)
+	if err != nil {
+		return  cpuset.CPUSet{}, fmt.Errorf("Unable to fetch shared cpu list: %v", err)
+	}
+	cpuSet, err := cpuset.Parse(strings.TrimSpace(string(output)))
+	return cpuSet, err 
+}
