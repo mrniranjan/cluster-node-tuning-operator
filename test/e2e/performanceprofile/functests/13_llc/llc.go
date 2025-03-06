@@ -1,4 +1,3 @@
-
 package __llc
 
 import (
@@ -7,17 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
 	"k8s.io/utils/cpuset"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	corev1 "k8s.io/api/core/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"k8s.io/apimachinery/pkg/labels"
 
 	igntypes "github.com/coreos/ignition/v2/config/v3_2/types"
 	machineconfigv1 "github.com/openshift/api/machineconfiguration/v1"
@@ -31,17 +31,18 @@ import (
 	testclient "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/client"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/label"
 	testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mcps"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/pods"
 
 	//"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mcps"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cgroup/controller"
 	//"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/images"
-	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/deployments"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/namespaces"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/poolname"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/profiles"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/profilesupdate"
-	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/deployments"
 )
 
 const (
@@ -55,7 +56,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 	var (
 		workerRTNodes      []corev1.Node
 		perfProfile        *performancev2.PerformanceProfile
-		//performanceMCP     string
+		performanceMCP     string
 		err                error
 		profileAnnotations map[string]string
 		poolName           string
@@ -85,8 +86,8 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 		if !cgroupV2 {
 			Skip("prefer-align-cpus-by-uncorecache cpumanager policy options is supported in cgroupv2 configuration only")
 		}
-		//performanceMCP, err = mcps.GetByProfile(perfProfile)
-		//Expect(err).ToNot(HaveOccurred())
+		performanceMCP, err = mcps.GetByProfile(perfProfile)
+		Expect(err).ToNot(HaveOccurred())
 
 		poolName = poolname.GetByProfile(ctx, perfProfile)
 
@@ -290,6 +291,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 
 		It("[test_id:77725] Align Guaranteed pod requesting 16 cpus to the whole CCX if available", Label("llc1"), func() {
 			ctx := context.Background()
+			podLabel := make(map[string]string)
 			targetNode := workerRTNodes[0]
 			cpusetCfg := &controller.CpuSet{}
 			deploymentName := "test-deployment"
@@ -297,8 +299,15 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				corev1.ResourceCPU:    resource.MustParse("16"),
 				corev1.ResourceMemory: resource.MustParse("100Mi"),
 			}
-			dp, err := createDeployment(ctx, deploymentName, &targetNode, rl)
+			podLabel["type"] = "telco"
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
 			Expect(err).ToNot(HaveOccurred())
+			defer func() {
+				// delete deployment
+				testlog.Infof("Deleting Deployment %v", deploymentName)
+				err := testclient.DataPlaneClient.Delete(ctx, dp)
+				Expect(err).ToNot(HaveOccurred())
+			}()
 			podList := &corev1.PodList{}
 			listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
 			Eventually(func() bool {
@@ -316,36 +325,132 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			getCCX := nodes.GetL3SharedCPUs(&targetNode)
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err := getCCX(cgroupCpuset.List()[0])
-
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cgroupCpuset).To(Equal(cpus))
+		})
+
+		It("[test_id:77725] Verify guaranteed pod consumes the whole Uncore group after reboot", Label("llc2"), func() {
+			ctx := context.Background()
+			podLabel := make(map[string]string)
+			targetNode := workerRTNodes[0]
+			cpusetCfg := &controller.CpuSet{}
+			deploymentName := "test-deployment"
+			rl := &corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("16"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}
+			podLabel["type"] = "telco"
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+			Expect(err).ToNot(HaveOccurred())
+			testlog.TaggedInfof("Deployment", "Deployment %s created", deploymentName)
 			defer func() {
 				// delete deployment
 				testlog.Infof("Deleting Deployment %v", deploymentName)
 				err := testclient.DataPlaneClient.Delete(ctx, dp)
 				Expect(err).ToNot(HaveOccurred())
 			}()
+			podList := &corev1.PodList{}
+			listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
+			Eventually(func() bool {
+				isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dp)
+				Expect(err).ToNot(HaveOccurred())
+				return isReady
+			},  time.Minute, time.Second).Should(BeTrue())
+			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
+			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
+			testpod := podList.Items[0]
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			Expect(err).ToNot(HaveOccurred())
+			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
+			Expect(err).ToNot(HaveOccurred())
+			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
+			getCCX := nodes.GetL3SharedCPUs(&targetNode)
+			// fetch ccx to which cpu used by pod is part of
+			cpus, err := getCCX(cgroupCpuset.List()[0])
+			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is %q: ", testpod.Name, cgroupCpuset.List()[0], cpus)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cgroupCpuset).To(Equal(cpus))
+			// reboot the node
+			rebootCmd := "chroot /rootfs systemctl reboot"
+			testlog.TaggedInfof("Reboot", "Node %q: Rebooting", targetNode.Name)
+
+			out, err := nodes.ExecCommand(ctx, &targetNode, []string{"sh", "-c", rebootCmd})
+			testlog.Infof("Node Rebooted: %s", string(out))
+
+			By("Rebooted node manually and waiting for mcp to get Updating status")
+			mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdating, corev1.ConditionTrue)
+
+			By("Waiting for mcp to be updated")
+			mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
+
+			// After reboot check the deployment
+			desiredStatus := appsv1.DeploymentStatus{
+				Replicas: 1,
+				AvailableReplicas: 1,
+			}
+			err = deployments.WaitForCondition(ctx, dp, testclient.Client, testutils.NamespaceTesting, dp.Name, desiredStatus)
+			Expect(err).ToNot(HaveOccurred())
+			testlog.TaggedInfof("Deployment", "Deployment %q is running after reboot", dp.Name)
+
+			listOptions = &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
+			Eventually(func() bool {
+				isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dp)
+				Expect(err).ToNot(HaveOccurred())
+				return isReady
+			},  time.Minute, time.Second).Should(BeTrue())
+			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
+			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
+			testpod = podList.Items[0]
+
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			Expect(err).ToNot(HaveOccurred())
+			cgroupCpuset, err = cpuset.Parse(cpusetCfg.Cpus)
+			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
+			Expect(err).ToNot(HaveOccurred())
+			getCCX = nodes.GetL3SharedCPUs(&targetNode)
+			// fetch ccx to which cpu used by pod is part of
+			cpus, err = getCCX(cgroupCpuset.List()[0])
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cgroupCpuset).To(Equal(cpus))
+			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is %q: ", testpod.Name, cgroupCpuset.List()[0], cpus)
+
 		})
 
-		It("[test_id:77726] Multiple Pods are not sharing same L3 cache", Label("llc2"), func() {
+		It("[test_id:77726] Multiple Pods are not sharing same L3 cache", Label("llc3"), func() {
 			ctx := context.Background()
 			targetNode := workerRTNodes[0]
 			// create 2 deployments creating 2 gu pods asking for 8 cpus each
 			cpusetCfg := &controller.CpuSet{}
 			var cpusetList []cpuset.CPUSet
 			var dpList []*appsv1.Deployment
+			podLabel := make(map[string]string)
 			for i :=0; i < 2; i++ {
 				deploymentName := fmt.Sprintf("test-deployment%d", i)
 				rl := &corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("8"),
 					corev1.ResourceMemory: resource.MustParse("100Mi"),
 				}
-				dp, err := createDeployment(ctx, deploymentName, &targetNode, rl)
+				podLabel := make(map[string]string)
+				podLabel["type"] = fmt.Sprintf("telco%d", i)
+				testlog.TaggedInfof("Deployment", "Creating Deployment %v", deploymentName)
+				dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
 				Expect(err).ToNot(HaveOccurred())
+				dpList = append(dpList, dp)
+			}
+			defer func() {
+				// delete deployment
+				for _, dp := range dpList {
+					testlog.TaggedInfof("Deployment", "Deleting Deployment %v", dp.Name)
+					err := testclient.DataPlaneClient.Delete(ctx, dp)
+					Expect(err).ToNot(HaveOccurred())
+				}
+			}()
+			for i:=0; i < 2; i++ {
 				podList := &corev1.PodList{}
-				listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
+				podLabel["type"] = fmt.Sprintf("telco%d", i)
+				listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(podLabel)}
 				Eventually(func() bool {
-					isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dp)
+					isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dpList[i])
 					Expect(err).ToNot(HaveOccurred())
 					return isReady
 				},  time.Minute, time.Second).Should(BeTrue())
@@ -354,30 +459,24 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
 				Expect(err).ToNot(HaveOccurred())
 				podCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
-				testlog.Infof("Cpus used by pod %v are %v", testpod.Name, podCpuset.String())
+				testlog.TaggedInfof("Pod","Cpus used by pod %v are %v", testpod.Name, podCpuset.String())
 				Expect(err).ToNot(HaveOccurred())
 				getCCX := nodes.GetL3SharedCPUs(&targetNode)
 				// fetch ccx to which cpu used by pod is part of
 				cpus, err := getCCX(podCpuset.List()[0])
-				testlog.Infof("%d is part of CCX group %s", podCpuset.List()[0], cpus.String())
+				testlog.TaggedInfof("L3 Cache Group", "cpu id %d used Pod %s is part of CCX group %s", podCpuset.List()[0], testpod.Name,  cpus.String())
 				cpusetList = append(cpusetList, cpus)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(podCpuset.IsSubsetOf(cpus))
 				cpusetList = append(cpusetList, cpus)
-				dpList = append(dpList, dp)
 			}
-			fmt.Println(cpusetList[0].String())
-			fmt.Println(cpusetList[1].String())
-			defer func() {
-				// delete deployment
-				for _, dp := range dpList {
-					testlog.Infof("Deleting Deployment %v", dp.Name)
-					err := testclient.DataPlaneClient.Delete(ctx, dp)
-					Expect(err).ToNot(HaveOccurred())
-				}
-			}()
+			// Here pods of both deployments can take the full core even as it will follow
+			// packed allocation
+			// From KEP: takeUncoreCache and takePartialUncore will still follow a "packed" allocation principle as the rest of the implementation.
+			// Uncore Cache IDs will be scanned in numerical order and assigned as possible. For takePartialUncore, CPUs will be assigned
+			// within the uncore cache in numerical order to follow a "packed" methodology.
+			Expect(cpusetList[0]).To(Equal(cpusetList[1]))
 		})
-
 	})
 })
 
@@ -438,6 +537,8 @@ func makePod(ns string, opts ...func(pod *corev1.Pod)) *corev1.Pod {
 	return p
 }
 
+
+
 func withRequests(rl *corev1.ResourceList) func(p *corev1.Pod) {
 	return func(p *corev1.Pod) {
 		p.Spec.Containers[0].Resources.Requests = *rl
@@ -451,7 +552,7 @@ func withLimits(rl *corev1.ResourceList) func(p *corev1.Pod) {
 }
 
 // create a deployment to deploy pods
-func createDeployment(ctx context.Context, deploymentName string, targetNode *corev1.Node, podResources *corev1.ResourceList) (*appsv1.Deployment, error) {
+func createDeployment(ctx context.Context, deploymentName string, podLabel map[string]string, targetNode *corev1.Node, podResources *corev1.ResourceList) (*appsv1.Deployment, error) {
 	testNode := make(map[string]string)
 	var err error
 	testNode["kubernetes.io/hostname"] = targetNode.Name
@@ -459,6 +560,9 @@ func createDeployment(ctx context.Context, deploymentName string, targetNode *co
 	dp := deployments.Make(deploymentName, testutils.NamespaceTesting,
 		deployments.WithPodTemplate(p),
 		deployments.WithNodeSelector(testNode))
+	dp.Spec.Selector.MatchLabels = podLabel
+	dp.Spec.Template.ObjectMeta.Labels= podLabel
 	err = testclient.Client.Create(ctx, dp)
 	return dp, err
 }
+
