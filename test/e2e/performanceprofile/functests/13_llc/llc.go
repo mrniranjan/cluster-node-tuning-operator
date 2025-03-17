@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	//"os"
 	"time"
 
 	"k8s.io/utils/cpuset"
@@ -37,6 +38,7 @@ import (
 	//"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mcps"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cgroup/controller"
 	//"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/images"
+	//"github.com/openshift-kni/cnf-features-deploy/cnf-tests/node-utils/pkg/machine"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/deployments"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/namespaces"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
@@ -50,6 +52,7 @@ const (
 	defaultIgnitionContentSource = "data:text/plain;charset=utf-8;base64"
 	defaultIgnitionVersion       = "3.2.0"
 	fileMode                     = 0420
+	restartCooldownTime          = 2 * time.Minute
 )
 
 var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.OpenShift)), Ordered, func() {
@@ -308,6 +311,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				err := testclient.DataPlaneClient.Delete(ctx, dp)
 				Expect(err).ToNot(HaveOccurred())
 			}()
+
 			podList := &corev1.PodList{}
 			listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
 			Eventually(func() bool {
@@ -320,17 +324,22 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			testpod := podList.Items[0]
 			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
 			Expect(err).ToNot(HaveOccurred())
-			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
+			testpodCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
+			testlog.TaggedInfof("Pod", "CPUs used by %q are: %q", testpod.Name, testpodCpuset.String())
+			//testlog.Infof("CPUs used by %q are: %q ", testpod.Name, testpodCpuset.String())
 			Expect(err).ToNot(HaveOccurred())
 			getCCX := nodes.GetL3SharedCPUs(&targetNode)
 			// fetch ccx to which cpu used by pod is part of
-			cpus, err := getCCX(cgroupCpuset.List()[0])
+			cpus, err := getCCX(testpodCpuset.List()[0])
+			testlog.TaggedInfof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
+			//testlog.Infof("CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(cgroupCpuset).To(Equal(cpus))
+			Expect(testpodCpuset).To(Equal(cpus))
 		})
 
 		It("[test_id:77725] Verify guaranteed pod consumes the whole Uncore group after reboot", Label("llc2"), func() {
 			ctx := context.Background()
+			var err error
 			podLabel := make(map[string]string)
 			targetNode := workerRTNodes[0]
 			cpusetCfg := &controller.CpuSet{}
@@ -373,8 +382,8 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			// reboot the node
 			rebootCmd := "chroot /rootfs systemctl reboot"
 			testlog.TaggedInfof("Reboot", "Node %q: Rebooting", targetNode.Name)
-
 			out, err := nodes.ExecCommand(ctx, &targetNode, []string{"sh", "-c", rebootCmd})
+			Expect(err).ToNot(HaveOccurred())
 			testlog.Infof("Node Rebooted: %s", string(out))
 
 			By("Rebooted node manually and waiting for mcp to get Updating status")
@@ -409,14 +418,101 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(err).ToNot(HaveOccurred())
 			getCCX = nodes.GetL3SharedCPUs(&targetNode)
 			// fetch ccx to which cpu used by pod is part of
-			cpus, err = getCCX(cgroupCpuset.List()[0])
+			cpus, err = getCCX (cgroupCpuset.List()[0])
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cgroupCpuset).To(Equal(cpus))
 			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is %q: ", testpod.Name, cgroupCpuset.List()[0], cpus)
 
 		})
 
-		It("[test_id:77726] Multiple Pods are not sharing same L3 cache", Label("llc3"), func() {
+		It("[test_id:77725]  Verify guaranteed pod consumes the whole Uncore group after kubelet restart", Label("llc3"), func() {
+			ctx := context.Background()
+			podLabel := make(map[string]string)
+			targetNode := workerRTNodes[0]
+			cpusetCfg := &controller.CpuSet{}
+			deploymentName := "test-deployment"
+			rl := &corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("16"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}
+			podLabel["type"] = "telco"
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+			Expect(err).ToNot(HaveOccurred())
+			defer func() {
+				// delete deployment
+				testlog.Infof("Deleting Deployment %v", deploymentName)
+				err := testclient.DataPlaneClient.Delete(ctx, dp)
+				Expect(err).ToNot(HaveOccurred())
+			}()
+			podList := &corev1.PodList{}
+			listOptions := &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
+			Eventually(func() bool {
+				isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dp)
+				Expect(err).ToNot(HaveOccurred())
+				return isReady
+			},  time.Minute, time.Second).Should(BeTrue())
+			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
+			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
+			testpod := podList.Items[0]
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			Expect(err).ToNot(HaveOccurred())
+			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
+			Expect(err).ToNot(HaveOccurred())
+			getCCX := nodes.GetL3SharedCPUs(&targetNode)
+			// fetch ccx to which cpu used by pod is part of
+			cpus, err := getCCX(cgroupCpuset.List()[0])
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cgroupCpuset).To(Equal(cpus))
+
+			kubeletRestartCmd := []string{
+					"chroot",
+					"/rootfs",
+					"/bin/bash",
+					"-c",
+					"systemctl restart kubelet",
+				}
+
+			_, _ = nodes.ExecCommand(ctx, &targetNode, kubeletRestartCmd)
+			nodes.WaitForReadyOrFail("post kubele restart", targetNode.Name, 20*time.Minute, 3*time.Second)
+			// giving kubelet more time to stabilize and initialize itself before
+			testlog.Infof("post restart: entering cooldown time: %v", restartCooldownTime)
+			time.Sleep(restartCooldownTime)
+
+			testlog.Infof("post restart: finished cooldown time: %v", restartCooldownTime)
+			// After restart of kubelet check the deployment
+			desiredStatus := appsv1.DeploymentStatus{
+				Replicas: 1,
+				AvailableReplicas: 1,
+			}
+			err = deployments.WaitForCondition(ctx, dp, testclient.Client, testutils.NamespaceTesting, dp.Name, desiredStatus)
+			Expect(err).ToNot(HaveOccurred())
+			testlog.TaggedInfof("Deployment", "Deployment %q is running after reboot", dp.Name)
+
+			listOptions = &client.ListOptions{Namespace: testutils.NamespaceTesting, LabelSelector: labels.SelectorFromSet(dp.Spec.Selector.MatchLabels)}
+
+			Eventually(func() bool {
+				isReady, err := deployments.IsReady(ctx, testclient.Client, listOptions, podList, dp)
+				Expect(err).ToNot(HaveOccurred())
+				return isReady
+			},  time.Minute, time.Second).Should(BeTrue())
+			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
+			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
+			testpod = podList.Items[0]
+
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			Expect(err).ToNot(HaveOccurred())
+			cgroupCpuset, err = cpuset.Parse(cpusetCfg.Cpus)
+			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
+			Expect(err).ToNot(HaveOccurred())
+			getCCX = nodes.GetL3SharedCPUs(&targetNode)
+			// fetch ccx to which cpu used by pod is part of
+			cpus, err = getCCX(cgroupCpuset.List()[0])
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cgroupCpuset).To(Equal(cpus))
+			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is: %q", testpod.Name, cgroupCpuset.List()[0], cpus)
+		})
+
+		It("[test_id:77726] Multiple Pods are not sharing same L3 cache", Label("llc4"), func() {
 			ctx := context.Background()
 			targetNode := workerRTNodes[0]
 			// create 2 deployments creating 2 gu pods asking for 8 cpus each
@@ -566,3 +662,30 @@ func createDeployment(ctx context.Context, deploymentName string, podLabel map[s
 	return dp, err
 }
 
+// Get machine info
+/*func getMachineInfo() {
+	ma := machine.Machine{}
+	if err := json.Decoder(os.Stdin).Decode(&ma); err != nil {
+		fmt.Errorf("json decode failed: v\n", err)
+	}
+	for _, node := range ma.Topology.Nodes {
+		fmt.Printf("node. %02d\n", node.Id)
+		for _, cache := range node.Caches {
+			if cache.Level < 3 {
+				continue
+			}
+			fmt.Printf("  level: %02d\n", cache.Level)
+			fmt.Printf("   cpus: %v\n", cpusetFromLogicalProcessors(cache.LogicalProcessors...).String())
+		}
+	}
+}
+
+
+
+func cpusetFromLogicalProcessors(procs ...uint32) cpuset.CPUSet {
+	cpuList := make([]int, 0, len(procs))
+	for _, proc := range procs {
+		cpuList = append(cpuList, int(proc))
+	}
+	return cpuset.New(cpuList...)
+}*/

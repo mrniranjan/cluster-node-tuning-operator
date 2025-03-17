@@ -1,3 +1,4 @@
+
 package log
 
 import (
@@ -49,4 +50,9 @@ func Error(args ...interface{}) {
 // Errorf logs the warning with arguments
 func Errorf(format string, args ...interface{}) {
 	logf("[ERROR]", format, args...)
+}
+
+// Tagged Infof logs tagged info with arguments
+func TaggedInfof(tag string, format string, args ...interface{}) {
+    logf("[INFO]", fmt.Sprintf("[%s] %s", tag, format), args...)
 }

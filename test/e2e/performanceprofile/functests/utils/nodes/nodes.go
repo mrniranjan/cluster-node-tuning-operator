@@ -551,6 +551,7 @@ func CpuManagerCpuSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, er
 // GetL3SharedCPUs creates a function that retrieves cpus for a given Node
 // takes a worker cnf node and returns a closure when called with cpuId returns
 // the corresponding cpus of core complex to which cpuId is part of
+
 func GetL3SharedCPUs(node *corev1.Node) func(cpuId int) (cpuset.CPUSet, error) {
 	return func (cpuId int) (cpuset.CPUSet, error) {
 		cacheSizeFile := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/cache/index3/shared_cpu_list", cpuId)
