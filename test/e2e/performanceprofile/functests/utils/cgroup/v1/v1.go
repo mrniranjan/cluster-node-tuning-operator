@@ -14,6 +14,7 @@ import (
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cgroup/runtime"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/pods"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 type ControllersManager struct {
@@ -85,13 +86,13 @@ func stat(k8sclient *kubernetes.Clientset, pod *corev1.Pod, containerName, child
 	return cpuStat, nil
 }
 
-func (cm *ControllersManager) Pod(ctx context.Context, pod *corev1.Pod, controllerConfig interface{}) error {
+func (cm *ControllersManager) Pod(ctx context.Context, pod *corev1.Pod, controllerConfig interface{}, logger *mylog.TestLogger) error {
 	// TODO
 	return nil
 }
 
-func (cm *ControllersManager) Container(ctx context.Context, pod *corev1.Pod, containerName string, controllerConfig interface{}) error {
-	runtimeType, err := runtime.GetContainerRuntimeTypeFor(ctx, cm.client, pod)
+func (cm *ControllersManager) Container(ctx context.Context, pod *corev1.Pod, containerName string, controllerConfig interface{}, logger *mylog.TestLogger) error {
+	runtimeType, err := runtime.GetContainerRuntimeTypeFor(ctx, cm.client, pod, logger)
 	if err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func (cm *ControllersManager) Container(ctx context.Context, pod *corev1.Pod, co
 	return err
 }
 
-func (cm *ControllersManager) Child(ctx context.Context, pod *corev1.Pod, containerName, childName string, controllerConfig interface{}) error {
+func (cm *ControllersManager) Child(ctx context.Context, pod *corev1.Pod, containerName, childName string, controllerConfig interface{}, logger *mylog.TestLogger) error {
 	// TODO
 	return nil
 }

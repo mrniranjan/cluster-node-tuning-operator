@@ -23,6 +23,7 @@ import (
 	testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/namespaces"
 	testpods "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/pods"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 const serviceAccountSuffix = "sa"
@@ -150,7 +151,7 @@ func getDaemonPodByNode(ctx context.Context, node *corev1.Node) (*corev1.Pod, er
 }
 
 // ExecCommand executing the command on a daemon pod of the given node
-func ExecCommand(ctx context.Context, node *corev1.Node, command []string) ([]byte, error) {
+func ExecCommand(ctx context.Context, node *corev1.Node, command []string, logger *mylog.TestLogger) ([]byte, error) {
 	// Ensure the node inspector is running
 	ok, err := isRunning(ctx)
 	if err != nil {
@@ -163,8 +164,8 @@ func ExecCommand(ctx context.Context, node *corev1.Node, command []string) ([]by
 	if err != nil {
 		return nil, err
 	}
-	testlog.Infof("found daemon pod %s for node %s", pod.Name, node.Name)
-
+	//testlog.Infof("found daemon pod %s for node %s", pod.Name, node.Name)
+	logger.Infof("Infra", "found daemon pod %s for node %s", pod.Name, node.Name)
 	return testpods.WaitForPodOutput(ctx, testclient.K8sClient, pod, command)
 }
 

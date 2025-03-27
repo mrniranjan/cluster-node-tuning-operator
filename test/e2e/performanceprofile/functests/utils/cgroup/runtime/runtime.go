@@ -11,6 +11,7 @@ import (
 
 	testutils "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 const (
@@ -21,7 +22,7 @@ const (
 
 // GetContainerRuntimeTypeFor return the container runtime type that is being used
 // in the node where the given pod is running
-func GetContainerRuntimeTypeFor(ctx context.Context, c client.Client, pod *corev1.Pod) (string, error) {
+func GetContainerRuntimeTypeFor(ctx context.Context, c client.Client, pod *corev1.Pod, logger *mylog.TestLogger) (string, error) {
 	node := &corev1.Node{}
 	if err := c.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
 		return "", err
@@ -33,7 +34,7 @@ func GetContainerRuntimeTypeFor(ctx context.Context, c client.Client, pod *corev
 		"-c",
 		fmt.Sprintf("/bin/ps aux | grep '%s' | grep -oP '(?<=-r\\s)[^\\s]+'", pod.Name),
 	}
-	output, err := nodes.ExecCommand(ctx, node, cmd)
+	output, err := nodes.ExecCommand(ctx, node, cmd, logger)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command on node; cmd=%q node=%q err=%v", cmd, node.Name, err)
 	}

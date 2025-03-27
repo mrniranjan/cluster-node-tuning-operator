@@ -45,6 +45,7 @@ import (
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/poolname"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/profiles"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/profilesupdate"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 const (
@@ -55,6 +56,7 @@ const (
 	restartCooldownTime          = 2 * time.Minute
 )
 
+
 var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.OpenShift)), Ordered, func() {
 	var (
 		workerRTNodes      []corev1.Node
@@ -63,13 +65,17 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 		err                error
 		profileAnnotations map[string]string
 		poolName           string
-		//llcPolicy          string
-		//mc                 *machineconfigv1.MachineConfig
+		llcPolicy          string
+	//mc                 *machineconfigv1.MachineConfig
 		getter                   cgroup.ControllersGetter
 		cgroupV2                 bool
+		logger            *mylog.TestLogger
 	)
 
 	BeforeAll(func() {
+
+		logger =  mylog.NewTestLogger()
+		
 		profileAnnotations = make(map[string]string)
 		ctx := context.Background()
 
@@ -95,7 +101,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 		poolName = poolname.GetByProfile(ctx, perfProfile)
 
 		/*mc, err = createMachineConfig(perfProfile)
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).ToNot(HaveOccurred())*/
 
 		llcPolicy = `{"cpuManagerPolicyOptions":{"prefer-align-cpus-by-uncorecache":"true", "full-pcpus-only":"true"}}`
 		profileAnnotations["kubeletconfig.experimental"] = llcPolicy
@@ -103,15 +109,15 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 		// Create machine config to create file /etc/kubernetes/openshift-llc-alignment
 		// required to enable align-cpus-by-uncorecache cpumanager policy
 
-		By("Enabling Uncore cache feature")
-		Expect(testclient.Client.Create(context.TODO(), mc)).To(Succeed(), "Unable to apply machine config for enabling uncore cache")
+		//By("Enabling Uncore cache feature")
+		//Expect(testclient.Client.Create(context.TODO(), mc)).To(Succeed(), "Unable to apply machine config for enabling uncore cache")
 
-		Expect(err).ToNot(HaveOccurred(), "Unable to apply machine config for enabling uncore cache")
+		//Expect(err).ToNot(HaveOccurred(), "Unable to apply machine config for enabling uncore cache")
 
-		mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdating, corev1.ConditionTrue)
-		By("Waiting when mcp finishes updates")
+		//mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdating, corev1.ConditionTrue)
+		//By("Waiting when mcp finishes updates")
 
-		mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
+		//mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
 
 		// Apply Annotation to enable align-cpu-by-uncorecache cpumanager policy option
 		if perfProfile.Annotations == nil || perfProfile.Annotations["kubeletconfig.experimental"] != llcPolicy {
@@ -124,9 +130,8 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			By(fmt.Sprintf("Applying changes in performance profile and waiting until %s will start updating", poolName))
 			profilesupdate.WaitForTuningUpdating(ctx, perfProfile)
 
-			By(fmt.Sprintf("Waiting when %s finishes updates", poolName))
 			profilesupdate.WaitForTuningUpdated(ctx, perfProfile)
-		}*/
+		}
 
 	})
 
@@ -161,7 +166,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			It("[test_id:77722] kubelet is configured appropriately", func() {
 				ctx := context.Background()
 				for _, node := range workerRTNodes {
-					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node)
+					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node, logger)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(kubeletconfig.CPUManagerPolicyOptions).To(HaveKeyWithValue("prefer-align-cpus-by-uncorecache", "true"))
 				}
@@ -186,7 +191,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				}
 
 				for _, node := range workerRTNodes {
-					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node)
+					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node, logger)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(kubeletconfig.CPUManagerPolicyOptions).ToNot(HaveKey("prefer-align-cpus-by-uncorecache"))
 				}
@@ -210,7 +215,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				profilesupdate.WaitForTuningUpdated(ctx, perfProfile)
 
 				for _, node := range workerRTNodes {
-					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node)
+					kubeletconfig, err := nodes.GetKubeletConfig(ctx, &node, logger)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(kubeletconfig.CPUManagerPolicyOptions).To(HaveKeyWithValue("prefer-align-cpus-by-uncorecache", "false"))
 				}
@@ -228,13 +233,13 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			//Expect(err).ToNot(HaveOccurred())
 			ctx := context.Background()
 			for _, cnfnode := range workerRTNodes {
-				numaInfo, err := nodes.GetNumaNodes(context.TODO(), &cnfnode)
+				numaInfo, err := nodes.GetNumaNodes(context.TODO(), &cnfnode, logger)
 				Expect(err).ToNot(HaveOccurred(), "Unable to get numa information from the node")
 				if len(numaInfo) < 2 {
 					Skip(fmt.Sprintf("This test need 2 Numa nodes. The number of numa nodes on node %s < 2", cnfnode.Name))
 				}
 
-				getCCX := nodes.GetL3SharedCPUs(&cnfnode)
+				getCCX := nodes.GetL3SharedCPUs(&cnfnode, logger)
 				cpus, err := getCCX(0)
 				Expect(err).ToNot(HaveOccurred())
 				cpuGroupSize = cpus.Size()
@@ -307,7 +312,8 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(err).ToNot(HaveOccurred())
 			defer func() {
 				// delete deployment
-				testlog.Infof("Deleting Deployment %v", deploymentName)
+				//testlog.Infof("Deleting Deployment %v", deploymentName)
+				logger.Infof("Cleanup", "Deleting Deployment %v", deploymentName)
 				err := testclient.DataPlaneClient.Delete(ctx, dp)
 				Expect(err).ToNot(HaveOccurred())
 			}()
@@ -322,16 +328,18 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
 			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
 			testpod := podList.Items[0]
-			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 			Expect(err).ToNot(HaveOccurred())
 			testpodCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
-			testlog.TaggedInfof("Pod", "CPUs used by %q are: %q", testpod.Name, testpodCpuset.String())
+			//testlog.TaggedInfof("Pod", "CPUs used by %q are: %q", testpod.Name, testpodCpuset.String())
+			logger.Infof("Pod", "Cpus used by %q are: %q", testpod.Name, testpodCpuset.String())
 			//testlog.Infof("CPUs used by %q are: %q ", testpod.Name, testpodCpuset.String())
 			Expect(err).ToNot(HaveOccurred())
-			getCCX := nodes.GetL3SharedCPUs(&targetNode)
+			getCCX := nodes.GetL3SharedCPUs(&targetNode, logger)
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err := getCCX(testpodCpuset.List()[0])
-			testlog.TaggedInfof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
+			//testlog.TaggedInfof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
+			logger.Infof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
 			//testlog.Infof("CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(testpodCpuset).To(Equal(cpus))
@@ -368,23 +376,26 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
 			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
 			testpod := podList.Items[0]
-			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 			Expect(err).ToNot(HaveOccurred())
 			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
 			Expect(err).ToNot(HaveOccurred())
 			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
-			getCCX := nodes.GetL3SharedCPUs(&targetNode)
+			getCCX := nodes.GetL3SharedCPUs(&targetNode, logger)
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err := getCCX(cgroupCpuset.List()[0])
-			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is %q: ", testpod.Name, cgroupCpuset.List()[0], cpus)
+			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is: %q", testpod.Name, cgroupCpuset.List()[0], cpus)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cgroupCpuset).To(Equal(cpus))
 			// reboot the node
 			rebootCmd := "chroot /rootfs systemctl reboot"
 			testlog.TaggedInfof("Reboot", "Node %q: Rebooting", targetNode.Name)
-			out, err := nodes.ExecCommand(ctx, &targetNode, []string{"sh", "-c", rebootCmd})
-			Expect(err).ToNot(HaveOccurred())
-			testlog.Infof("Node Rebooted: %s", string(out))
+			// the reason we are not asserting because once we hit reboot command
+			// system can immediately disconnect , making it to do any assertsion
+			// of it's output or error status
+			_, _ = nodes.ExecCommand(ctx, &targetNode, []string{"sh", "-c", rebootCmd}, logger)
+			//Expect(err).ToNot(HaveOccurred())
+			//testlog.Infof("Node Rebooted: %s", string(out))
 
 			By("Rebooted node manually and waiting for mcp to get Updating status")
 			mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdating, corev1.ConditionTrue)
@@ -411,18 +422,17 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
 			testpod = podList.Items[0]
 
-			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 			Expect(err).ToNot(HaveOccurred())
 			cgroupCpuset, err = cpuset.Parse(cpusetCfg.Cpus)
 			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
 			Expect(err).ToNot(HaveOccurred())
-			getCCX = nodes.GetL3SharedCPUs(&targetNode)
+			getCCX = nodes.GetL3SharedCPUs(&targetNode, logger)
 			// fetch ccx to which cpu used by pod is part of
-			cpus, err = getCCX (cgroupCpuset.List()[0])
+			cpus, err = getCCX(cgroupCpuset.List()[0])
+			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is: %q", testpod.Name, cgroupCpuset.List()[0], cpus)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(cgroupCpuset).To(Equal(cpus))
-			testlog.TaggedInfof("L3 Cache Group", "L3 Cache group associated with Pod %s using cpu %d is %q: ", testpod.Name, cgroupCpuset.List()[0], cpus)
-
+			Expect(cgroupCpuset).To(Equal(cpus),"L3 Cache group %q and pod's cpuset %q are not same", cgroupCpuset.String(), cpus.String())
 		})
 
 		It("[test_id:77725]  Verify guaranteed pod consumes the whole Uncore group after kubelet restart", Label("llc3"), func() {
@@ -454,11 +464,11 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
 			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
 			testpod := podList.Items[0]
-			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 			Expect(err).ToNot(HaveOccurred())
 			cgroupCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
 			Expect(err).ToNot(HaveOccurred())
-			getCCX := nodes.GetL3SharedCPUs(&targetNode)
+			getCCX := nodes.GetL3SharedCPUs(&targetNode, logger)
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err := getCCX(cgroupCpuset.List()[0])
 			Expect(err).ToNot(HaveOccurred())
@@ -472,7 +482,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 					"systemctl restart kubelet",
 				}
 
-			_, _ = nodes.ExecCommand(ctx, &targetNode, kubeletRestartCmd)
+			_, _ = nodes.ExecCommand(ctx, &targetNode, kubeletRestartCmd, logger)
 			nodes.WaitForReadyOrFail("post kubele restart", targetNode.Name, 20*time.Minute, 3*time.Second)
 			// giving kubelet more time to stabilize and initialize itself before
 			testlog.Infof("post restart: entering cooldown time: %v", restartCooldownTime)
@@ -499,12 +509,12 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			Expect(len(podList.Items)).To(Equal(1), "Expected exactly one pod in the list")
 			testpod = podList.Items[0]
 
-			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+			err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 			Expect(err).ToNot(HaveOccurred())
 			cgroupCpuset, err = cpuset.Parse(cpusetCfg.Cpus)
 			testlog.TaggedInfof("Pod","pod %s using cpus %q", testpod.Name, cgroupCpuset.String())
 			Expect(err).ToNot(HaveOccurred())
-			getCCX = nodes.GetL3SharedCPUs(&targetNode)
+			getCCX = nodes.GetL3SharedCPUs(&targetNode, logger)
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err = getCCX(cgroupCpuset.List()[0])
 			Expect(err).ToNot(HaveOccurred())
@@ -552,12 +562,12 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				},  time.Minute, time.Second).Should(BeTrue())
 				Expect(testclient.Client.List(ctx, podList, listOptions)).To(Succeed())
 				testpod := podList.Items[0]
-				err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg)
+				err = getter.Container(ctx, &testpod, testpod.Spec.Containers[0].Name, cpusetCfg, logger)
 				Expect(err).ToNot(HaveOccurred())
 				podCpuset, err := cpuset.Parse(cpusetCfg.Cpus)
 				testlog.TaggedInfof("Pod","Cpus used by pod %v are %v", testpod.Name, podCpuset.String())
 				Expect(err).ToNot(HaveOccurred())
-				getCCX := nodes.GetL3SharedCPUs(&targetNode)
+				getCCX := nodes.GetL3SharedCPUs(&targetNode, logger)
 				// fetch ccx to which cpu used by pod is part of
 				cpus, err := getCCX(podCpuset.List()[0])
 				testlog.TaggedInfof("L3 Cache Group", "cpu id %d used Pod %s is part of CCX group %s", podCpuset.List()[0], testpod.Name,  cpus.String())
@@ -633,8 +643,6 @@ func makePod(ns string, opts ...func(pod *corev1.Pod)) *corev1.Pod {
 	return p
 }
 
-
-
 func withRequests(rl *corev1.ResourceList) func(p *corev1.Pod) {
 	return func(p *corev1.Pod) {
 		p.Spec.Containers[0].Resources.Requests = *rl
@@ -661,31 +669,3 @@ func createDeployment(ctx context.Context, deploymentName string, podLabel map[s
 	err = testclient.Client.Create(ctx, dp)
 	return dp, err
 }
-
-// Get machine info
-/*func getMachineInfo() {
-	ma := machine.Machine{}
-	if err := json.Decoder(os.Stdin).Decode(&ma); err != nil {
-		fmt.Errorf("json decode failed: v\n", err)
-	}
-	for _, node := range ma.Topology.Nodes {
-		fmt.Printf("node. %02d\n", node.Id)
-		for _, cache := range node.Caches {
-			if cache.Level < 3 {
-				continue
-			}
-			fmt.Printf("  level: %02d\n", cache.Level)
-			fmt.Printf("   cpus: %v\n", cpusetFromLogicalProcessors(cache.LogicalProcessors...).String())
-		}
-	}
-}
-
-
-
-func cpusetFromLogicalProcessors(procs ...uint32) cpuset.CPUSet {
-	cpuList := make([]int, 0, len(procs))
-	for _, proc := range procs {
-		cpuList = append(cpuList, int(proc))
-	}
-	return cpuset.New(cpuList...)
-}*/

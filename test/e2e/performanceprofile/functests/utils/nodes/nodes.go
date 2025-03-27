@@ -29,6 +29,7 @@ import (
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cluster"
 	testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
 	nodeInspector "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/node_inspector"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 const (
@@ -141,14 +142,14 @@ func GetNonPerformancesWorkers(nodeSelectorLabels map[string]string) ([]corev1.N
 }
 
 // ExecCommand returns the output of the command execution as a []byte
-func ExecCommand(ctx context.Context, node *corev1.Node, command []string) ([]byte, error) {
-	return nodeInspector.ExecCommand(ctx, node, command)
+func ExecCommand(ctx context.Context, node *corev1.Node, command []string, logger *mylog.TestLogger) ([]byte, error) {
+	return nodeInspector.ExecCommand(ctx, node, command, logger)
 }
 
 // GetKubeletConfig returns KubeletConfiguration loaded from the node /etc/kubernetes/kubelet.conf
-func GetKubeletConfig(ctx context.Context, node *corev1.Node) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
+func GetKubeletConfig(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
 	command := []string{"cat", path.Join("/rootfs", testutils.FilePathKubeletConfig)}
-	kubeletBytes, err := ExecCommand(ctx, node, command)
+	kubeletBytes, err := ExecCommand(ctx, node, command, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +199,7 @@ func MatchingOptionalSelector(toFilter []corev1.Node) ([]corev1.Node, error) {
 }
 
 // HasPreemptRTKernel returns no error if the node booted with PREEMPT RT kernel
-func HasPreemptRTKernel(ctx context.Context, node *corev1.Node) error {
+func HasPreemptRTKernel(ctx context.Context, node *corev1.Node,logger *mylog.TestLogger) error {
 	// verify that the kernel-rt-core installed it also means the the machine booted with the RT kernel
 	// because the machine-config-daemon uninstalls regular kernel once you install the RT one and
 	// on traditional yum systems, rpm -q kernel can be completely different from what you're booted
@@ -206,12 +207,12 @@ func HasPreemptRTKernel(ctx context.Context, node *corev1.Node) error {
 	// with rpm-ostree rpm -q is telling you what you're booted into always,
 	// because ostree binds together (kernel, userspace) as a single commit.
 	cmd := []string{"chroot", "/rootfs", "rpm", "-q", "kernel-rt-core"}
-	if _, err := ExecCommand(ctx, node, cmd); err != nil {
+	if _, err := ExecCommand(ctx, node, cmd, logger); err != nil {
 		return err
 	}
 
 	cmd = []string{"/bin/bash", "-c", "cat /rootfs/sys/kernel/realtime"}
-	output, err := ExecCommand(ctx, node, cmd)
+	output, err := ExecCommand(ctx, node, cmd, logger)
 	if err != nil {
 		return err
 	}
@@ -224,9 +225,9 @@ func HasPreemptRTKernel(ctx context.Context, node *corev1.Node) error {
 	return nil
 }
 
-func GetDefaultSmpAffinityRaw(ctx context.Context, node *corev1.Node) (string, error) {
+func GetDefaultSmpAffinityRaw(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (string, error) {
 	cmd := []string{"cat", "/proc/irq/default_smp_affinity"}
-	out, err := ExecCommand(ctx, node, cmd)
+	out, err := ExecCommand(ctx, node, cmd, logger)
 	if err != nil {
 		return "", err
 	}
@@ -240,8 +241,8 @@ func GetDefaultSmpAffinityRaw(ctx context.Context, node *corev1.Node) (string, e
 //	of offline cpus and will return the affinity bits for those
 //	as well. You must intersect the mask with the mask returned
 //	by GetOnlineCPUsSet if this is not desired.
-func GetDefaultSmpAffinitySet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, error) {
-	defaultSmpAffinity, err := GetDefaultSmpAffinityRaw(ctx, node)
+func GetDefaultSmpAffinitySet(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (cpuset.CPUSet, error) {
+	defaultSmpAffinity, err := GetDefaultSmpAffinityRaw(ctx, node, logger)
 	if err != nil {
 		return cpuset.New(), err
 	}
@@ -249,9 +250,9 @@ func GetDefaultSmpAffinitySet(ctx context.Context, node *corev1.Node) (cpuset.CP
 }
 
 // GetOnlineCPUsSet returns the list of online (being scheduled) CPUs on the node
-func GetOnlineCPUsSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, error) {
+func GetOnlineCPUsSet(ctx context.Context, node *corev1.Node,logger *mylog.TestLogger) (cpuset.CPUSet, error) {
 	command := []string{"cat", sysDevicesOnlineCPUs}
-	out, err := ExecCommand(ctx, node, command)
+	out, err := ExecCommand(ctx, node, command, logger)
 	if err != nil {
 		return cpuset.New(), err
 	}
@@ -261,9 +262,9 @@ func GetOnlineCPUsSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, er
 
 // GetSMTLevel returns the SMT level on the node using the given cpuID as target
 // Use a random cpuID from the return value of GetOnlineCPUsSet if not sure
-func GetSMTLevel(ctx context.Context, cpuID int, node *corev1.Node) int {
+func GetSMTLevel(ctx context.Context, cpuID int, node *corev1.Node, logger *mylog.TestLogger) int {
 	cmd := []string{"/bin/sh", "-c", fmt.Sprintf("cat /sys/devices/system/cpu/cpu%d/topology/thread_siblings_list | tr -d \"\n\r\"", cpuID)}
-	out, err := ExecCommand(ctx, node, cmd)
+	out, err := ExecCommand(ctx, node, cmd, logger)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 	threadSiblingsList := testutils.ToString(out)
 	// how many thread sibling you have = SMT level
@@ -274,9 +275,9 @@ func GetSMTLevel(ctx context.Context, cpuID int, node *corev1.Node) int {
 }
 
 // GetNumaNodes returns the number of numa nodes and the associated cpus as list on the node
-func GetNumaNodes(ctx context.Context, node *corev1.Node) (map[int][]int, error) {
+func GetNumaNodes(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (map[int][]int, error) {
 	lscpuCmd := []string{"lscpu", "-e=node,core,cpu", "-J"}
-	out, err := ExecCommand(ctx, node, lscpuCmd)
+	out, err := ExecCommand(ctx, node, lscpuCmd, logger)
 	var numaNode, cpu int
 	if err != nil {
 		return nil, err
@@ -301,10 +302,10 @@ func GetNumaNodes(ctx context.Context, node *corev1.Node) (map[int][]int, error)
 }
 
 // GetCoreSiblings returns the siblings of core per numa node
-func GetCoreSiblings(ctx context.Context, node *corev1.Node) (map[int]map[int][]int, error) {
+func GetCoreSiblings(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (map[int]map[int][]int, error) {
 	coreSiblings := make(map[int]map[int][]int)
 	lscpuCmd := []string{"lscpu", "-e=node,core,cpu", "-J"}
-	output, err := ExecCommand(ctx, node, lscpuCmd)
+	output, err := ExecCommand(ctx, node, lscpuCmd, logger)
 	if err != nil {
 		return coreSiblings, err
 	}
@@ -437,20 +438,20 @@ func GetNumaRanges(cpuString string) string {
 }
 
 // Get Node Ethernet/Virtual Interfaces
-func GetNodeInterfaces(ctx context.Context, node corev1.Node) ([]NodeInterface, error) {
+func GetNodeInterfaces(ctx context.Context, node corev1.Node, logger *mylog.TestLogger) ([]NodeInterface, error) {
 	var nodeInterfaces []NodeInterface
 	listNetworkInterfacesCmd := []string{"/bin/sh", "-c", "ls -l /sys/class/net"}
-	networkInterfaces, err := ExecCommand(ctx, &node, listNetworkInterfacesCmd)
+	networkInterfaces, err := ExecCommand(ctx, &node, listNetworkInterfacesCmd, logger)
 	if err != nil {
 		return nil, err
 	}
 	ipLinkShowCmd := []string{"ip", "link", "show"}
-	interfaceLinksStatus, err := ExecCommand(ctx, &node, ipLinkShowCmd)
+	interfaceLinksStatus, err := ExecCommand(ctx, &node, ipLinkShowCmd, logger)
 	if err != nil {
 		return nil, err
 	}
 	defaultRouteCmd := []string{"ip", "route", "show", "0.0.0.0/0"}
-	defaultRoute, err := ExecCommand(ctx, &node, defaultRouteCmd)
+	defaultRoute, err := ExecCommand(ctx, &node, defaultRouteCmd, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -510,13 +511,13 @@ func isNodeReady(node corev1.Node) bool {
 }
 
 // ContainerPid returns container process pid using crictl inspect command
-func ContainerPid(ctx context.Context, node *corev1.Node, containerId string) (string, error) {
+func ContainerPid(ctx context.Context, node *corev1.Node, containerId string, logger *mylog.TestLogger) (string, error) {
 	var err error
 	var criInfo CrictlInfo
 	var cridata = []byte{}
 	Eventually(func() []byte {
 		cmd := []string{"/usr/sbin/chroot", "/rootfs", "crictl", "inspect", containerId}
-		cridata, err = ExecCommand(ctx, node, cmd)
+		cridata, err = ExecCommand(ctx, node, cmd, logger)
 		Expect(err).ToNot(HaveOccurred(), "failed to run %s cmd", cmd)
 		return cridata
 	}, 10*time.Second, 5*time.Second).ShouldNot(BeEmpty())
@@ -528,11 +529,11 @@ func ContainerPid(ctx context.Context, node *corev1.Node, containerId string) (s
 }
 
 // CpuManagerCpuSet returns cpu manager state file data
-func CpuManagerCpuSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, error) {
+func CpuManagerCpuSet(ctx context.Context, node *corev1.Node,logger *mylog.TestLogger) (cpuset.CPUSet, error) {
 	stateFilePath := "/var/lib/kubelet/cpu_manager_state"
 	var stateData CpuManagerStateInfo
 	cmd := []string{"/usr/sbin/chroot", "/rootfs", "cat", stateFilePath}
-	data, err := ExecCommand(ctx, node, cmd)
+	data, err := ExecCommand(ctx, node, cmd, logger)
 	if err != nil {
 		return cpuset.New(), err
 	}
@@ -551,13 +552,12 @@ func CpuManagerCpuSet(ctx context.Context, node *corev1.Node) (cpuset.CPUSet, er
 // GetL3SharedCPUs creates a function that retrieves cpus for a given Node
 // takes a worker cnf node and returns a closure when called with cpuId returns
 // the corresponding cpus of core complex to which cpuId is part of
-
-func GetL3SharedCPUs(node *corev1.Node) func(cpuId int) (cpuset.CPUSet, error) {
+func GetL3SharedCPUs(node *corev1.Node, logger *mylog.TestLogger) func(cpuId int) (cpuset.CPUSet, error) {
 	return func (cpuId int) (cpuset.CPUSet, error) {
 		cacheSizeFile := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/cache/index3/shared_cpu_list", cpuId)
 		cmd := []string{"cat", cacheSizeFile}
 		ctx := context.Background()
-		output, err := ExecCommand(ctx, node, cmd)
+		output, err := ExecCommand(ctx, node, cmd, logger)
 		if err != nil {
 			return cpuset.CPUSet{}, fmt.Errorf("Unable to fetch shared cpu list: %v", err)
 		}

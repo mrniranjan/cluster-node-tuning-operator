@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"fmt"
 	"encoding/json"
 	"github.com/pkg/errors"
 	"net/http"
@@ -43,6 +44,7 @@ func RetrieveJiraStatus(key string) (*JiraIssueStatusResponse, error) {
 	}
 
 	response := JiraIssueStatusResponse{}
+	fmt.Println("response ", response) 
 	decoder := json.NewDecoder(ret.Body)
 	err = decoder.Decode(&response)
 	if err != nil {
