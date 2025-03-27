@@ -47,9 +47,9 @@ import (
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
-var RunningOnSingleNode bool
 var workerRTNode *corev1.Node
 var profile *performancev2.PerformanceProfile
+var RunningOnSingleNode bool
 
 const restartCooldownTime = 1 * time.Minute
 const cgroupRoot string = "/sys/fs/cgroup"
@@ -130,7 +130,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 
 		cpus, err := cpuSpecToString(profile.Spec.CPU)
 		Expect(err).ToNot(HaveOccurred(), "failed to parse cpu %v spec to string", cpus)
-		By(fmt.Sprintf("Checking the profile %s with cpus %s", profile.Name, cpus))
+		//By(fmt.Sprintf("Checking the profile %s with cpus %s", profile.Name, cpus))
 		balanceIsolated = true
 		if profile.Spec.CPU.BalanceIsolated != nil {
 			balanceIsolated = *profile.Spec.CPU.BalanceIsolated
@@ -151,13 +151,13 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	Describe("Verification of configuration on the worker node", Label(string(label.Tier0), "logtest"), func() {
-		It("[test_id:28528][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU reservation on the node", func() {
-			By(fmt.Sprintf("Allocatable CPU should be less than capacity by %d", len(listReservedCPU)))
+	Describe("Verification of configuration on the worker node", Label(string(label.Tier0)), func() {
+		It("[test_id:28528][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU reservation on the node", Label("logtest"), func() {
+			//By(fmt.Sprintf("Allocatable CPU should be less than capacity by %d", len(listReservedCPU)))
 			capacityCPU, _ := workerRTNode.Status.Capacity.Cpu().AsInt64()
-			logger.Infof("Test Info", "Node %q cpu capacity %q", workerRTNode.Name, capacityCPU)
+			logger.Infof("Test Info", "Node %s cpu capacity %d", workerRTNode.Name, capacityCPU)
 			allocatableCPU, _ := workerRTNode.Status.Allocatable.Cpu().AsInt64()
-			logger.Infof("Test Info", "Node %q Allocatable cpu capacity %q", workerRTNode.Name, capacityCPU)
+			logger.Infof("Test Info", "Node %s Allocatable cpu capacity %d", workerRTNode.Name, allocatableCPU)
 			differenceCPUGot := capacityCPU - allocatableCPU
 			differenceCPUExpected := int64(len(listReservedCPU))
 			Expect(differenceCPUGot).To(Equal(differenceCPUExpected), "Allocatable CPU %d should be less than capacity %d by %d; got %d instead", allocatableCPU, capacityCPU, differenceCPUExpected, differenceCPUGot)
@@ -886,7 +886,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 						return fmt.Errorf("pod CPUs NOT entirely part of cpus with load balance disabled: %v vs %v", podCpus, cpuIDs)
 					}
 					return nil
-				}, 2*time.Minute, 5*time.Second, "checking scheduling domains with pod running")
+				}, 2*time.Minute, 5*time.Second, "checking scheduling domains with pod running", logger)
 			})
 
 			It("[test_id:73382]cpuset.cpus.exclusive of kubepods.slice should be updated", func() {

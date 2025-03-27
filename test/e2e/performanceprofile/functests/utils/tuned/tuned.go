@@ -26,6 +26,7 @@ import (
 	testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodepools"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 func GetPod(ctx context.Context, node *corev1.Node) (*corev1.Pod, error) {
@@ -48,10 +49,10 @@ func GetPod(ctx context.Context, node *corev1.Node) (*corev1.Pod, error) {
 	return &podList.Items[0], nil
 }
 
-func WaitForStalldTo(ctx context.Context, run bool, interval, timeout time.Duration, node *corev1.Node) error {
+func WaitForStalldTo(ctx context.Context, run bool, interval, timeout time.Duration, node *corev1.Node, logger *mylog.TestLogger) error {
 	return wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (bool, error) {
 		cmd := []string{"/bin/bash", "-c", "pidof stalld || echo \"stalld not running\""}
-		out, err := nodes.ExecCommand(ctx, node, cmd)
+		out, err := nodes.ExecCommand(ctx, node, cmd, logger)
 		if err != nil {
 			klog.Errorf("failed to execute command %q on node: %q; %v", cmd, node.Name, err)
 			return false, err
@@ -72,10 +73,10 @@ func WaitForStalldTo(ctx context.Context, run bool, interval, timeout time.Durat
 	})
 }
 
-func CheckParameters(ctx context.Context, node *corev1.Node, sysctlMap map[string]string, kernelParameters []string, stalld, rtkernel bool) {
+func CheckParameters(ctx context.Context, node *corev1.Node, sysctlMap map[string]string, kernelParameters []string, stalld, rtkernel bool, logger *mylog.TestLogger) {
 	cmd := []string{"/bin/bash", "-c", "pidof stalld || echo \"stalld not running\""}
 	By(fmt.Sprintf("Executing %q", cmd))
-	out, err := nodes.ExecCommand(ctx, node, cmd)
+	out, err := nodes.ExecCommand(ctx, node, cmd, logger)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q; %v", cmd, node.Name, err)
 	stalldPid := testutils.ToString(out)
 	_, err = strconv.Atoi(stalldPid)
@@ -107,7 +108,7 @@ func CheckParameters(ctx context.Context, node *corev1.Node, sysctlMap map[strin
 	for param, expected := range sysctlMap {
 		cmd = []string{"sysctl", "-n", param}
 		By(fmt.Sprintf("Executing %q", cmd))
-		output, err := nodes.ExecCommand(ctx, node, cmd)
+		output, err := nodes.ExecCommand(ctx, node, cmd, logger)
 		ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q", cmd, node.Name)
 		out := testutils.ToString(output)
 		ExpectWithOffset(1, out).Should(Equal(expected), "parameter %s value is not %s", param, expected)
@@ -115,7 +116,7 @@ func CheckParameters(ctx context.Context, node *corev1.Node, sysctlMap map[strin
 
 	cmd = []string{"cat", "/proc/cmdline"}
 	By(fmt.Sprintf("Executing %q", cmd))
-	out, err = nodes.ExecCommand(ctx, node, cmd)
+	out, err = nodes.ExecCommand(ctx, node, cmd, logger)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q", cmd, node.Name)
 	cmdline := testutils.ToString(out)
 
@@ -126,12 +127,12 @@ func CheckParameters(ctx context.Context, node *corev1.Node, sysctlMap map[strin
 	if !rtkernel {
 		cmd = []string{"uname", "-a"}
 		By(fmt.Sprintf("Executing %q", cmd))
-		out, err := nodes.ExecCommand(ctx, node, cmd)
+		out, err := nodes.ExecCommand(ctx, node, cmd, logger)
 		ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q", cmd, node.Name)
 		kernel := testutils.ToString(out)
 		ExpectWithOffset(1, kernel).To(ContainSubstring("Linux"), "kernel should be Linux")
 
-		err = nodes.HasPreemptRTKernel(ctx, node)
+		err = nodes.HasPreemptRTKernel(ctx, node, logger)
 		ExpectWithOffset(1, err).To(HaveOccurred(), "node should have non-RT kernel")
 	}
 }
@@ -150,7 +151,7 @@ func GetProfile(ctx context.Context, cli client.Client, ns, name string) (*tuned
 }
 
 // AddPstateParameter returns the correct intel_pstate based on hw generation
-func AddPstateParameter(ctx context.Context, node *corev1.Node) string {
+func AddPstateParameter(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) string {
 	var (
 		filePath       = "/sys/devices/cpu/caps/pmu_name"
 		processorsName = []string{"sandybridge", "ivybridge", "haswell", "broadwell", "skylake"}
@@ -159,7 +160,7 @@ func AddPstateParameter(ctx context.Context, node *corev1.Node) string {
 		totalCpus      = 32
 	)
 
-	out, err := nodes.ExecCommand(ctx, node, []string{"nproc", "--all"})
+	out, err := nodes.ExecCommand(ctx, node, []string{"nproc", "--all"}, logger)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q", out, node.Name)
 	onlineCPUCount := testutils.ToString(out)
 	onlineCPUInt, err := strconv.Atoi(onlineCPUCount)
@@ -171,7 +172,7 @@ func AddPstateParameter(ctx context.Context, node *corev1.Node) string {
 
 	cmd := []string{"cat", filePath}
 	By(fmt.Sprintf("Executing %q", cmd))
-	out, err = nodes.ExecCommand(ctx, node, cmd)
+	out, err = nodes.ExecCommand(ctx, node, cmd, logger)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to execute command %q on node: %q", cmd, node.Name)
 	if err != nil {
 		return pstateDisabled

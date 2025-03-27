@@ -308,7 +308,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				corev1.ResourceMemory: resource.MustParse("100Mi"),
 			}
 			podLabel["type"] = "telco"
-			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl, logger)
 			Expect(err).ToNot(HaveOccurred())
 			defer func() {
 				// delete deployment
@@ -339,7 +339,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 			// fetch ccx to which cpu used by pod is part of
 			cpus, err := getCCX(testpodCpuset.List()[0])
 			//testlog.TaggedInfof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
-			logger.Infof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
+			logger.Infof("L3 Cache Group", "CPU Group sharing L3 Cache to which %s is alloted are: %s", testpod.Name, cpus.String())
 			//testlog.Infof("CPU Group sharing L3 Cache to which %s is alloted are: %s ", testpod.Name, cpus.String())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(testpodCpuset).To(Equal(cpus))
@@ -357,7 +357,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				corev1.ResourceMemory: resource.MustParse("100Mi"),
 			}
 			podLabel["type"] = "telco"
-			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl, logger)
 			Expect(err).ToNot(HaveOccurred())
 			testlog.TaggedInfof("Deployment", "Deployment %s created", deploymentName)
 			defer func() {
@@ -446,7 +446,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				corev1.ResourceMemory: resource.MustParse("100Mi"),
 			}
 			podLabel["type"] = "telco"
-			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+			dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl, logger)
 			Expect(err).ToNot(HaveOccurred())
 			defer func() {
 				// delete deployment
@@ -539,7 +539,7 @@ var _ = Describe("[rfe_id:77446] LLC-aware cpu pinning", Label(string(label.Open
 				podLabel := make(map[string]string)
 				podLabel["type"] = fmt.Sprintf("telco%d", i)
 				testlog.TaggedInfof("Deployment", "Creating Deployment %v", deploymentName)
-				dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl)
+				dp, err := createDeployment(ctx, deploymentName, podLabel, &targetNode, rl, logger)
 				Expect(err).ToNot(HaveOccurred())
 				dpList = append(dpList, dp)
 			}
@@ -656,7 +656,7 @@ func withLimits(rl *corev1.ResourceList) func(p *corev1.Pod) {
 }
 
 // create a deployment to deploy pods
-func createDeployment(ctx context.Context, deploymentName string, podLabel map[string]string, targetNode *corev1.Node, podResources *corev1.ResourceList) (*appsv1.Deployment, error) {
+func createDeployment(ctx context.Context, deploymentName string, podLabel map[string]string, targetNode *corev1.Node, podResources *corev1.ResourceList, logger *mylog.TestLogger) (*appsv1.Deployment, error) {
 	testNode := make(map[string]string)
 	var err error
 	testNode["kubernetes.io/hostname"] = targetNode.Name
@@ -666,6 +666,7 @@ func createDeployment(ctx context.Context, deploymentName string, podLabel map[s
 		deployments.WithNodeSelector(testNode))
 	dp.Spec.Selector.MatchLabels = podLabel
 	dp.Spec.Template.ObjectMeta.Labels= podLabel
+	logger.Infof("Test Prequsites", "Creating Deployment %s", deploymentName)
 	err = testclient.Client.Create(ctx, dp)
 	return dp, err
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
 	corev1 "k8s.io/api/core/v1"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
+	
 )
 
 // CpuArchitecture  struct to represent CPU Details
@@ -23,10 +25,10 @@ const (
 )
 
 // lscpuPraser parses lscpu output and returns its fields in struct
-func lscpuPraser(ctx context.Context, node *corev1.Node) (CpuArchitecture, error) {
+func lscpuPraser(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (CpuArchitecture, error) {
 	cmd := []string{"lscpu", "-J"}
 	var cpuinfo CpuArchitecture
-	out, err := nodes.ExecCommand(ctx, node, cmd)
+	out, err := nodes.ExecCommand(ctx, node, cmd, logger)
 	if err != nil {
 		return cpuinfo, fmt.Errorf("error executing lscpu command: %v", err)
 	}
@@ -38,8 +40,8 @@ func lscpuPraser(ctx context.Context, node *corev1.Node) (CpuArchitecture, error
 }
 
 // CPUArchitecture returns CPU Architecture from lscpu output
-func CPUArchitecture(ctx context.Context, node *corev1.Node) (string, error) {
-	cpuInfo, err := lscpuPraser(ctx, node)
+func CPUArchitecture(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (string, error) {
+	cpuInfo, err := lscpuPraser(ctx, node, logger)
 	if err != nil {
 		return "", fmt.Errorf("Unable to parse lscpu output")
 	}
@@ -52,8 +54,8 @@ func CPUArchitecture(ctx context.Context, node *corev1.Node) (string, error) {
 }
 
 // CPUVendorId returns Vendor ID information from lscpu output
-func CPUVendorId(ctx context.Context, node *corev1.Node) (string, error) {
-	cpuInfo, err := lscpuPraser(ctx, node)
+func CPUVendorId(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (string, error) {
+	cpuInfo, err := lscpuPraser(ctx, node, logger)
 	if err != nil {
 		return "", fmt.Errorf("Unable to parse lscpu output")
 	}
@@ -66,8 +68,8 @@ func CPUVendorId(ctx context.Context, node *corev1.Node) (string, error) {
 }
 
 // IsCPUVendor checks if the CPU Vendor ID matches the given vendor string
-func IsCPUVendor(ctx context.Context, node *corev1.Node, vendor string) (bool, error) {
-	vendorData, err := CPUVendorId(ctx, node)
+func IsCPUVendor(ctx context.Context, node *corev1.Node, vendor string, logger *mylog.TestLogger) (bool, error) {
+	vendorData, err := CPUVendorId(ctx, node, logger)
 	if err != nil {
 		return false, err
 	}
@@ -75,8 +77,8 @@ func IsCPUVendor(ctx context.Context, node *corev1.Node, vendor string) (bool, e
 }
 
 // IsIntel returns if Vendor ID is GenuineIntel in lscpu output
-func IsIntel(ctx context.Context, node *corev1.Node) (bool, error) {
-	isIntel, err := IsCPUVendor(ctx, node, IntelVendorID)
+func IsIntel(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (bool, error) {
+	isIntel, err := IsCPUVendor(ctx, node, IntelVendorID, logger)
 	if err != nil {
 		return false, err
 	}
@@ -84,8 +86,8 @@ func IsIntel(ctx context.Context, node *corev1.Node) (bool, error) {
 }
 
 // IsAMD returns if Vendor ID is AuthenticAMD in lscpu output
-func IsAMD(ctx context.Context, node *corev1.Node) (bool, error) {
-	isAMD, err := IsCPUVendor(ctx, node, AMDVendorID)
+func IsAMD(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (bool, error) {
+	isAMD, err := IsCPUVendor(ctx, node, AMDVendorID, logger)
 	if err != nil {
 		return false, err
 	}
@@ -93,8 +95,8 @@ func IsAMD(ctx context.Context, node *corev1.Node) (bool, error) {
 }
 
 // IsARM returns if Architecture is aarch64
-func IsARM(ctx context.Context, node *corev1.Node) (bool, error) {
-	architectureData, err := CPUArchitecture(ctx, node)
+func IsARM(ctx context.Context, node *corev1.Node, logger *mylog.TestLogger) (bool, error) {
+	architectureData, err := CPUArchitecture(ctx, node, logger)
 	if err != nil {
 		return false, err
 	}

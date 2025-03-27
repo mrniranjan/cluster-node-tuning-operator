@@ -33,11 +33,12 @@ const clusterRoleBindingSuffix = "crb"
 var initialized bool
 
 // initialize would be used to lazy initialize the node inspector
-func initialize(ctx context.Context) error {
+func initialize(ctx context.Context, logger *mylog.TestLogger) error {
 	if initialized {
 		return nil
 	}
-	testlog.Info("initializing node inspector")
+	logger.Info("Test Infra", "Initializing Node inspector")
+	//testlog.Info("initializing node inspector")
 	// NodeInspectorNamespace is the namespace
 	// used for deploying a DaemonSet that will be used to executing commands on nodes.
 	nodeInspectorNamespace := &corev1.Namespace{
@@ -47,25 +48,27 @@ func initialize(ctx context.Context) error {
 	}
 	err := testclient.DataPlaneClient.Create(ctx, nodeInspectorNamespace)
 	if err != nil && !errors.IsAlreadyExists(err) {
+		logger.Errorf("failed to create namespace: %v", err)
 		return fmt.Errorf("failed to create namespace: %v", err)
 	}
 
 	// Create Node Inspector resources
-	err = create(ctx)
+	err = create(ctx, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create Node Inspector resources: %v", err)
 	}
 	return nil
 }
 
-func create(ctx context.Context) error {
+func create(ctx context.Context, logger *mylog.TestLogger) error {
 	serviceAccountName := fmt.Sprintf("%s-%s", testutils.NodeInspectorName, serviceAccountSuffix)
 	sa := createServiceAccount(serviceAccountName, testutils.NodeInspectorNamespace)
 	if err := testclient.DataPlaneClient.Create(ctx, sa); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
-		testlog.Warningf("Node Inspector ServiceAccount %s already exists, this is not expected.", serviceAccountName)
+		logger.Infof("Test Infra", "Node Inspector ServiceAccount %s already exists, this is not expected.", serviceAccountName)
+		//testlog.Warningf("Node Inspector ServiceAccount %s already exists, this is not expected.", serviceAccountName)
 	}
 	clusterRoleName := fmt.Sprintf("%s-%s", testutils.NodeInspectorName, clusterRoleSuffix)
 	cr := createClusterRole(clusterRoleName)
@@ -73,7 +76,8 @@ func create(ctx context.Context) error {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
-		testlog.Warningf("Node Inspector ClusterRole %s already exists, this is not expected.", clusterRoleName)
+		logger.Infof("Test Infra", "Node Inspector ClusterRole %s already exists, this is not expected.", clusterRoleName)
+		//testlog.Warningf("Node Inspector ClusterRole %s already exists, this is not expected.", clusterRoleName)
 	}
 	clusterRoleBindingName := fmt.Sprintf("%s-%s", testutils.NodeInspectorName, clusterRoleBindingSuffix)
 	rb := createClusterRoleBinding(clusterRoleBindingName, testutils.NodeInspectorNamespace, serviceAccountName, clusterRoleName)
@@ -81,16 +85,18 @@ func create(ctx context.Context) error {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
-		testlog.Warningf("Node Inspector ClusterRoleBinding %s already exists, this is not expected.", clusterRoleBindingName)
+		logger.Infof("Test Infra", "Node Inspector ClusterRoleBinding %s already exists, this is not expected.", clusterRoleBindingName)
+		//testlog.Warningf("Node Inspector ClusterRoleBinding %s already exists, this is not expected.", clusterRoleBindingName)
 	}
 	ds := createDaemonSet(testutils.NodeInspectorName, testutils.NodeInspectorNamespace, serviceAccountName, images.Test())
 	if err := testclient.DataPlaneClient.Create(ctx, ds); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
-		testlog.Warningf("Node Inspector Daemonset %s already exists, this is not expected.", testutils.NodeInspectorName)
+		logger.Infof("Test Infra", "Node Inspector Daemonset %s already exists, this is not expected.", testutils.NodeInspectorName)
+		//testlog.Warningf("Node Inspector Daemonset %s already exists, this is not expected.", testutils.NodeInspectorName)
 	}
-	if err := daemonset.WaitToBeRunning(testclient.DataPlaneClient, testutils.NodeInspectorNamespace, testutils.NodeInspectorName); err != nil {
+	if err := daemonset.WaitToBeRunning(testclient.DataPlaneClient, testutils.NodeInspectorNamespace, testutils.NodeInspectorName, logger); err != nil {
 		return err
 	}
 	initialized = true
@@ -122,14 +128,14 @@ func Delete(ctx context.Context) error {
 	return nil
 }
 
-func isRunning(ctx context.Context) (bool, error) {
+func isRunning(ctx context.Context, logger *mylog.TestLogger) (bool, error) {
 	if !initialized {
-		if err := initialize(ctx); err != nil {
+		if err := initialize(ctx, logger); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
-	return daemonset.IsRunning(testclient.DataPlaneClient, testutils.NodeInspectorNamespace, testutils.NodeInspectorName)
+	return daemonset.IsRunning(testclient.DataPlaneClient, testutils.NodeInspectorNamespace, testutils.NodeInspectorName, logger)
 }
 
 // getDaemonPodByNode returns the daemon pod that runs on the specified node
@@ -153,7 +159,7 @@ func getDaemonPodByNode(ctx context.Context, node *corev1.Node) (*corev1.Pod, er
 // ExecCommand executing the command on a daemon pod of the given node
 func ExecCommand(ctx context.Context, node *corev1.Node, command []string, logger *mylog.TestLogger) ([]byte, error) {
 	// Ensure the node inspector is running
-	ok, err := isRunning(ctx)
+	ok, err := isRunning(ctx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +171,7 @@ func ExecCommand(ctx context.Context, node *corev1.Node, command []string, logge
 		return nil, err
 	}
 	//testlog.Infof("found daemon pod %s for node %s", pod.Name, node.Name)
-	logger.Infof("Infra", "found daemon pod %s for node %s", pod.Name, node.Name)
+	logger.Infof("Test Infra", "found daemon pod %s for node %s", pod.Name, node.Name)
 	return testpods.WaitForPodOutput(ctx, testclient.K8sClient, pod, command)
 }
 

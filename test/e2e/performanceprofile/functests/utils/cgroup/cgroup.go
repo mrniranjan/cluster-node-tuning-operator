@@ -13,15 +13,16 @@ import (
 	apiconfigv1 "github.com/openshift/api/config/v1"
 	cgroupv1 "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cgroup/v1"
 	cgroupv2 "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/cgroup/v2"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 type ControllersGetter interface {
 	// Pod is for getting controller config at the pod level
-	Pod(ctx context.Context, pod *corev1.Pod, controllerConfig interface{}) error
+	Pod(ctx context.Context, pod *corev1.Pod, controllerConfig interface{}, logger *mylog.TestLogger) error
 	// Container is for getting controller config at the container level
-	Container(ctx context.Context, pod *corev1.Pod, containerName string, controllerConfig interface{}) error
+	Container(ctx context.Context, pod *corev1.Pod, containerName string, controllerConfig interface{}, logger *mylog.TestLogger) error
 	// Child is for getting controller config at the container's child level
-	Child(ctx context.Context, pod *corev1.Pod, containerName, childName string, controllerConfig interface{}) error
+	Child(ctx context.Context, pod *corev1.Pod, containerName, childName string, controllerConfig interface{}, logger *mylog.TestLogger) error
 }
 
 func IsVersion2(ctx context.Context, c client.Client) (bool, error) {

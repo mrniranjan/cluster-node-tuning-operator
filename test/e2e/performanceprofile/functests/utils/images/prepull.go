@@ -15,7 +15,8 @@ import (
 
 	testclient "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/client"
 	testds "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/daemonset"
-	testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
+	//testlog "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/log"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/mylog"
 )
 
 const (
@@ -34,7 +35,7 @@ func GetPullTimeout() (time.Duration, error) {
 }
 
 // PrePull makes sure the image is pre-pulled on the relevant nodes.
-func PrePull(cli client.Client, pullSpec, namespace, tag string) (*appsv1.DaemonSet, error) {
+func PrePull(cli client.Client, pullSpec, namespace, tag string, logger *mylog.TestLogger) (*appsv1.DaemonSet, error) {
 	name := PrePullPrefix + tag
 	ds := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -71,23 +72,28 @@ func PrePull(cli client.Client, pullSpec, namespace, tag string) (*appsv1.Daemon
 	if err != nil {
 		return &ds, err
 	}
-	testlog.Infof("pull timeout: %v", prePullTimeout)
+	logger.Infof("Test Infra", "pull timeout: %v", prePullTimeout)
+	//testlog.Infof("pull timeout: %v", prePullTimeout)
 
-	testlog.Infof("creating daemonset %s/%s to prepull %q", namespace, name, pullSpec)
+	logger.Infof("Test Infra", "creating daemonset %s/%s to prepull %q", namespace, name, pullSpec)
+	//testlog.Infof("creating daemonset %s/%s to prepull %q", namespace, name, pullSpec)
 	ts := time.Now()
 	err = cli.Create(context.TODO(), &ds)
 	if err != nil {
 		return &ds, err
 	}
 	data, _ := json.Marshal(ds)
-	testlog.Infof("created daemonset %s/%s to prepull %q:\n%s", namespace, name, pullSpec, string(data))
+	logger.Infof("Test Infra","created daemonset %s/%s to prepull %q:\n%s", namespace, name, pullSpec, string(data))
+	//testlog.Infof("created daemonset %s/%s to prepull %q:\n%s", namespace, name, pullSpec, string(data))
 
-	err = testds.WaitToBeRunningWithTimeout(testclient.Client, ds.Namespace, ds.Name, prePullTimeout)
+	err = testds.WaitToBeRunningWithTimeout(testclient.Client, ds.Namespace, ds.Name, prePullTimeout, logger)
 	if err != nil {
 		// if this fails, no big deal, we are just trying to make the troubleshooting easier
 		updatedDs, _ := testds.GetByName(testclient.Client, ds.Namespace, ds.Name)
 		return updatedDs, err
 	}
-	testlog.Infof("prepulled %q in %v", pullSpec, time.Since(ts))
+	
+	logger.Infof("Test Infra", "prepulled %q in %v", pullSpec, time.Since(ts))
+	//testlog.Infof("prepulled %q in %v", pullSpec, time.Since(ts))
 	return nil, nil
 }
