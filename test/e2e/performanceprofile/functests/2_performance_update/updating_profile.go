@@ -392,6 +392,15 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 		var oldMcpSelector, oldNodeSelector map[string]string
 
 		BeforeEach(func() {
+			// Check for schedulable control plane nodes and skip if found
+			// This test is incompatible with schedulable masters due to MCO coordination issues during cleanup
+			schedulabilityInfo, err := testutils.GetControlPlaneSchedulabilityInfo(context.TODO())
+			if err != nil {
+				testlog.Warningf("Failed to check control plane schedulability: %v", err)
+			} else if len(schedulabilityInfo.SchedulableControlPlaneNodes) > 0 {
+				Skip("Skipping nodeSelector update test - schedulable control plane nodes detected. This test is incompatible with schedulable masters due to cleanup conflicts.")
+			}
+
 			// initialize on every run
 			labelsDeletion = false
 			//fetch the latest profile
