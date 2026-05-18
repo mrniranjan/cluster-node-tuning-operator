@@ -49,6 +49,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 	var (
 		onlineCPUSet                  cpuset.CPUSet
 		reservedCPUSet                cpuset.CPUSet
+		isolatedCPUSet                cpuset.CPUSet
 		workerRTNode                  *corev1.Node
 		workerRTNodes                 []corev1.Node
 		profile, initialProfile       *performancev2.PerformanceProfile
@@ -98,6 +99,11 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 		reservedCPUSet, err = cpuset.Parse(string(*profile.Spec.CPU.Reserved))
 		Expect(err).ToNot(HaveOccurred(), "Failed to parse reserved CPUs from profile")
 		testlog.Infof("Reserved CPUSet: %s", reservedCPUSet)
+
+		Expect(profile.Spec.CPU.Isolated).ToNot(BeNil())
+		isolatedCPUSet, err = cpuset.Parse(string(*profile.Spec.CPU.Isolated))
+		Expect(err).ToNot(HaveOccurred(), "Failed to parse isolated CPUs from profile")
+		testlog.Infof("Isolated CPUSet: %s", isolatedCPUSet)
 	})
 
 	BeforeEach(func() {
@@ -285,9 +291,12 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				ovsAffinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 
 				By("Verifying OVS affinity matches expected")
-				sliceCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-				verifyOvsMatchesExpected(isWorkloadPartitioningEnabled, ovnAffinity, ovsAffinities,
-					sliceCpus, reservedCPUSet, cpuset.New())
+				if isWorkloadPartitioningEnabled {
+					verifyOvsMatchesExpectedWP(ovnAffinity, ovsAffinities,
+						reservedCPUSet, isolatedCPUSet, cpuset.New())
+				} else {
+					verifyOvsMatchesExpected(ovnAffinity, ovsAffinities)
+				}
 			})
 
 			It("[test_id:64101] Creating gu pods modifies affinity of ovs", func() {
@@ -299,10 +308,13 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				ovsAffinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 
 				By("Verifying OVS affinity excludes guaranteed pod CPUs")
-				guCPUs := getGuPodCPUs(ctx, testpod)
-				sliceCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-				verifyOvsMatchesExpected(isWorkloadPartitioningEnabled, ovnAffinity, ovsAffinities,
-					sliceCpus, reservedCPUSet, guCPUs)
+				guPodCPUs := getGuPodCPUs(ctx, testpod)
+				if isWorkloadPartitioningEnabled {
+					verifyOvsMatchesExpectedWP(ovnAffinity, ovsAffinities,
+						reservedCPUSet, isolatedCPUSet, guPodCPUs)
+				} else {
+					verifyOvsMatchesExpected(ovnAffinity, ovsAffinities)
+				}
 
 				Expect(pods.DeleteAndSync(ctx, testclient.DataPlaneClient, testpod)).To(Succeed())
 			})
@@ -319,18 +331,24 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				ovsAffinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 
 				By("Verifying OVS affinity excludes both GU pods' CPUs")
-				bothGU := getGuPodCPUs(ctx, testpod1).Union(getGuPodCPUs(ctx, testpod2))
-				sliceCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-				verifyOvsMatchesExpected(isWorkloadPartitioningEnabled, ovnAffinity, ovsAffinities,
-					sliceCpus, reservedCPUSet, bothGU)
+				bothGUPodCPUs := getGuPodCPUs(ctx, testpod1).Union(getGuPodCPUs(ctx, testpod2))
+				if isWorkloadPartitioningEnabled {
+					verifyOvsMatchesExpectedWP(ovnAffinity, ovsAffinities,
+						reservedCPUSet, isolatedCPUSet, bothGUPodCPUs)
+				} else {
+					verifyOvsMatchesExpected(ovnAffinity, ovsAffinities)
+				}
 
 				By("Deleting first GU pod and verifying OVS affinity adjusts")
 				Expect(pods.DeleteAndSync(ctx, testclient.DataPlaneClient, testpod1)).To(Succeed())
 				ovnAffinityAfterDelete := getOvnContainerAffinity(ctx, workerRTNode)
 				ovsAffinities = getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
-				sliceCpus = ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-				verifyOvsMatchesExpected(isWorkloadPartitioningEnabled, ovnAffinityAfterDelete, ovsAffinities,
-					sliceCpus, reservedCPUSet, getGuPodCPUs(ctx, testpod2))
+				if isWorkloadPartitioningEnabled {
+					verifyOvsMatchesExpectedWP(ovnAffinityAfterDelete, ovsAffinities,
+						reservedCPUSet, isolatedCPUSet, getGuPodCPUs(ctx, testpod2))
+				} else {
+					verifyOvsMatchesExpected(ovnAffinityAfterDelete, ovsAffinities)
+				}
 
 				By("Cleaning up second GU pod")
 				Expect(pods.DeleteAndSync(ctx, testclient.DataPlaneClient, testpod2)).To(Succeed())
@@ -347,7 +365,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				defer func() {
 					testlog.Infof("Deleting Deployment %s from Namespace %s", dp.Name, dp.Namespace)
 					Expect(testclient.DataPlaneClient.Delete(ctx, dp)).To(Succeed())
-					baselineCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
+					baselineCpus := reservedCPUSet.Union(isolatedCPUSet)
 					Eventually(func() bool {
 						affinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 						for pid, mask := range affinities {
@@ -369,11 +387,14 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				collectAndVerify := func(phase string) {
 					ovnAffinity := getOvnContainerAffinity(ctx, workerRTNode)
 					ovsAffinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
-					guCPUs := collectGuCPUsFromPodList(ctx, dpListOpts)
-					testlog.Infof("Phase %s: GU CPUs = %s", phase, guCPUs)
-					sliceCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-					verifyOvsMatchesExpected(isWorkloadPartitioningEnabled,
-						ovnAffinity, ovsAffinities, sliceCpus, reservedCPUSet, guCPUs)
+					guPodCPUs := collectGuCPUsFromPodList(ctx, dpListOpts)
+					testlog.Infof("Phase %s: GU CPUs = %s", phase, guPodCPUs)
+					if isWorkloadPartitioningEnabled {
+						verifyOvsMatchesExpectedWP(ovnAffinity, ovsAffinities,
+							reservedCPUSet, isolatedCPUSet, guPodCPUs)
+					} else {
+						verifyOvsMatchesExpected(ovnAffinity, ovsAffinities)
+					}
 				}
 
 				waitForDeploymentReady(ctx, dp, dpListOpts, 2)
@@ -393,12 +414,10 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				collectAndVerify("after-reboot")
 			})
 
-			// This test must run on both compact/SNO clusters (where workerRTNode is
-			// itself a control-plane node) and MNO clusters with schedulable control
-			// plane. On MNO, the CP node may be governed by a different profile, so we
-			// avoid relying on the worker profile's reservedCPUSet. Instead we verify
-			// OVS affinity against the node's online CPU set, which is always correct
-			// regardless of which profile manages the node.
+			// In this test setup ROLE_WORKER_CNF can target control-plane nodes
+			// (for example ROLE_WORKER_CNF=masters). Keep the baseline aligned with
+			// the selected profile by validating OVS affinity against
+			// reserved+isolated from that profile.
 			It("Verify OVS affinity is not restricted to reserved CPUs after control plane node reboot", func() {
 				isSchedulable, err := cluster.IsControlPlaneSchedulable(ctx)
 				Expect(err).ToNot(HaveOccurred(), "Unable to check if control plane is schedulable")
@@ -429,20 +448,13 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				}
 				testlog.Infof("Using control plane node: %s", cpNode.Name)
 
-				cpOnlineCPUs, err := nodes.GetOnlineCPUsSet(ctx, cpNode)
-				Expect(err).ToNot(HaveOccurred())
-
 				cpOvsServices := ovsSystemdServicesOnOvsSlice(ctx, cpNode)
+				baselineCPUs := reservedCPUSet.Union(isolatedCPUSet)
 
-				By("Verify OVS affinity before reboot spans all online CPUs")
+				By("Verify OVS affinity before reboot matches profile reserved+isolated")
 				ovsBeforeReboot := getOvsAffinities(ctx, cpOvsServices, cpNode)
 				Expect(ovsBeforeReboot).ToNot(BeEmpty(), "Expected non-empty OVS affinities on control-plane node before reboot")
-				for pid, mask := range ovsBeforeReboot {
-					testlog.Infof("Control plane OVS pid %s affinity before reboot: %s", pid, mask)
-					Expect(mask.Equals(cpOnlineCPUs)).To(BeTrue(),
-						"OVS pid %s affinity (%s) should match online CPUs (%s) before reboot",
-						pid, mask, cpOnlineCPUs)
-				}
+				verifyOvsAffinity(ovsBeforeReboot, baselineCPUs)
 
 				By(fmt.Sprintf("Rebooting the control plane node %q", cpNode.Name))
 				_, _ = nodes.ExecCommand(ctx, cpNode, []string{"sh", "-c", "chroot /rootfs systemctl reboot"})
@@ -456,25 +468,20 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				}, 5*time.Minute, 10*time.Second).Should(Succeed(),
 					"OVN pod did not become ready on control plane node after reboot")
 
-				By("Verify OVS affinity after reboot spans all online CPUs")
+				By("Verify OVS affinity after reboot matches profile reserved+isolated")
 				ovsAfterReboot := getOvsAffinities(ctx, cpOvsServices, cpNode)
 				Expect(ovsAfterReboot).ToNot(BeEmpty(), "Expected non-empty OVS affinities on control-plane node after reboot")
-				for pid, mask := range ovsAfterReboot {
-					testlog.Infof("Control plane OVS pid %s affinity after reboot: %s", pid, mask)
-					Expect(mask.Equals(cpOnlineCPUs)).To(BeTrue(),
-						"OVS pid %s affinity (%s) should match online CPUs (%s) after reboot",
-						pid, mask, cpOnlineCPUs)
-				}
+				verifyOvsAffinity(ovsAfterReboot, baselineCPUs)
 			})
 
 			// Automates OCPBUGS-35347: ovs-vswitchd is using isolated cpu pool instead of reserved pool
 			It("[test_id:75257] verify ovs-switchd threads inherit cpu affinity", func() {
 				checkCpuCount(ctx, workerRTNode)
 
-				By("Verifying ovs-vswitchd thread affinity covers OVS slice cpuset")
+				By("Verifying ovs-vswitchd thread affinity covers reserved+isolated CPUs")
 				threadAffinity, err := ovsSwitchdThreadAffinity(ctx, workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
-				baselineCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
+				baselineCpus := reservedCPUSet.Union(isolatedCPUSet)
 				for _, line := range threadAffinity {
 					if line != "" {
 						parts := strings.Split(line, ":")
@@ -493,7 +500,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				defer func() {
 					testlog.Infof("Deleting Deployment %s", dp.Name)
 					Expect(testclient.DataPlaneClient.Delete(ctx, dp)).To(Succeed())
-					baselineCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
+					baselineCpus := reservedCPUSet.Union(isolatedCPUSet)
 					Eventually(func() bool {
 						affinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 						for pid, mask := range affinities {
@@ -620,28 +627,28 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 
 				By("Create a GU pod and verify reserved CPUs remain in OVS affinity")
 				testpod := createGuPod(ctx, workerRTNode)
-				guCPUs := getGuPodCPUs(ctx, testpod)
+				guPodCPUs := getGuPodCPUs(ctx, testpod)
 
 				ovsAffinities = getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 				for pid, mask := range ovsAffinities {
 					testlog.Infof("OVS pid %s affinity with GU pod: %s", pid, mask)
 					Expect(reservedCPUSet.IsSubsetOf(mask)).To(BeTrue(),
 						"Reserved CPUs (%s) should still be a subset of OVS affinity (%s) for pid %s", reservedCPUSet, mask, pid)
-					Expect(guCPUs.IsSubsetOf(mask)).To(BeFalse(),
-						"GU pod CPUs (%s) should NOT be a subset of OVS affinity (%s)", guCPUs, mask)
+					Expect(guPodCPUs.IsSubsetOf(mask)).To(BeFalse(),
+						"GU pod CPUs (%s) should NOT be a subset of OVS affinity (%s)", guPodCPUs, mask)
 				}
 
 				By("Delete the GU pod and verify reserved CPUs are still in OVS affinity")
 				Expect(pods.DeleteAndSync(ctx, testclient.DataPlaneClient, testpod)).To(Succeed())
 
-				baselineCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
+				baselineCpus := reservedCPUSet.Union(isolatedCPUSet)
 				ovsAffinities = getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 				for pid, mask := range ovsAffinities {
 					testlog.Infof("OVS pid %s affinity after GU pod deletion: %s", pid, mask)
 					Expect(reservedCPUSet.IsSubsetOf(mask)).To(BeTrue(),
 						"Reserved CPUs (%s) should be a subset of OVS affinity (%s) for pid %s after deletion", reservedCPUSet, mask, pid)
 					Expect(mask).To(Equal(baselineCpus),
-						"OVS affinity should return to OVS slice cpuset after GU pod deletion")
+						"OVS affinity should return to reserved+isolated after GU pod deletion")
 				}
 			})
 
@@ -695,7 +702,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 						testlog.Infof("Cleaning up GU pod %s", p.Name)
 						Expect(pods.DeleteAndSync(ctx, testclient.DataPlaneClient, p)).To(Succeed())
 					}
-					baselineCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
+					baselineCpus := reservedCPUSet.Union(isolatedCPUSet)
 					Eventually(func() bool {
 						affinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
 						for pid, mask := range affinities {
@@ -712,8 +719,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				for _, p := range guPods {
 					guPodCPUs = guPodCPUs.Union(getGuPodCPUs(ctx, p))
 				}
-				sliceCpus := ovsSliceCpuset(ctx, ovsSystemdServices, workerRTNode)
-				expected := expectedOvsAffinity(sliceCpus, guPodCPUs)
+				expected := expectedOvsAffinity(reservedCPUSet, isolatedCPUSet, guPodCPUs)
 				testlog.Infof("GU pod CPUs: %s, expected OVS affinity: %s", guPodCPUs, expected)
 
 				By("Verify OVS affinity excludes the guaranteed pods' pinned CPUs")
@@ -932,9 +938,7 @@ func ovsSwitchdThreadAffinity(ctx context.Context, workerRTNode *corev1.Node) ([
 }
 
 // ovsSliceCpuset reads the effective cpuset of the ovs.slice parent cgroup
-// from the node. This is the kernel-enforced set of CPUs that OVS processes
-// are allowed to run on, reflecting systemd AllowedCPUs, workload partitioning,
-// and any future dedicated CPU exclusions (e.g. RFE-8921).
+// from the node.
 func ovsSliceCpuset(ctx context.Context, ovsServices []string, node *corev1.Node) cpuset.CPUSet {
 	GinkgoHelper()
 	pids, err := ovsPids(ctx, ovsServices, node)
@@ -959,11 +963,11 @@ func ovsSliceCpuset(ctx context.Context, ovsServices []string, node *corev1.Node
 }
 
 // expectedOvsAffinity computes the expected OVS process CPU affinity set.
-// Formula: OvsSliceCpuset - GU_Pinned
-// The OVS slice cpuset (read from cgroup) reflects the actual kernel-enforced
-// CPU constraint. Subtracting GU-pinned CPUs yields the correct expected affinity.
-func expectedOvsAffinity(ovsSliceCpus, guPodCPUs cpuset.CPUSet) cpuset.CPUSet {
-	return ovsSliceCpus.Difference(guPodCPUs)
+// Formula: (reserved + isolated) - GU_Pinned
+// reserved+isolated is the current profile-derived baseline for OVS. Subtracting
+// GU-pinned CPUs yields the expected affinity in workload partitioning mode.
+func expectedOvsAffinity(reservedCPUs, isolatedCPUs, guPodCPUs cpuset.CPUSet) cpuset.CPUSet {
+	return reservedCPUs.Union(isolatedCPUs).Difference(guPodCPUs)
 }
 
 // getOvnContainerAffinity returns the CPU affinity of the first OVN container
@@ -1003,21 +1007,24 @@ func verifyOvsAffinity(ovsAffinities map[string]cpuset.CPUSet, expected cpuset.C
 	}
 }
 
-// verifyOvsMatchesExpected handles the WP/non-WP verification pattern:
-//   - Under WP: asserts OVN is on reservedCPUs, computes expected OVS affinity
-//     via the formula, and verifies all OVS pids match.
-//   - Without WP: asserts all OVS pids match the OVN container affinity.
-func verifyOvsMatchesExpected(isWP bool, ovnAffinity cpuset.CPUSet,
-	ovsAffinities map[string]cpuset.CPUSet, ovsSliceCpus, reservedCPUs, guCPUs cpuset.CPUSet) {
+// verifyOvsMatchesExpected verifies non-workload-partitioning behavior where
+// OVS process affinity should match the OVN container affinity.
+func verifyOvsMatchesExpected(ovnAffinity cpuset.CPUSet,
+	ovsAffinities map[string]cpuset.CPUSet) {
 	GinkgoHelper()
-	if isWP {
-		Expect(ovnAffinity).To(Equal(reservedCPUs),
-			"Under WP, OVN container should be restricted to reserved cpus")
-		expected := expectedOvsAffinity(ovsSliceCpus, guCPUs)
-		verifyOvsAffinity(ovsAffinities, expected)
-	} else {
-		verifyOvsAffinity(ovsAffinities, ovnAffinity)
-	}
+	verifyOvsAffinity(ovsAffinities, ovnAffinity)
+}
+
+// verifyOvsMatchesExpectedWP verifies workload-partitioning behavior.
+// It asserts OVN is on reservedCPUs and OVS is on (reserved+isolated)-GU_Pinned.
+func verifyOvsMatchesExpectedWP(ovnAffinity cpuset.CPUSet,
+	ovsAffinities map[string]cpuset.CPUSet,
+	reservedCPUs, isolatedCPUs, guPodCPUs cpuset.CPUSet) {
+	GinkgoHelper()
+	Expect(ovnAffinity).To(Equal(reservedCPUs),
+		"Under WP, OVN container should be restricted to reserved cpus")
+	expected := expectedOvsAffinity(reservedCPUs, isolatedCPUs, guPodCPUs)
+	verifyOvsAffinity(ovsAffinities, expected)
 }
 
 // createGuPod creates a 2-CPU Guaranteed QoS pod on the given node, waits for
