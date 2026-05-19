@@ -47,7 +47,6 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 		cgroupRoot      string = "/rootfs/sys/fs/cgroup"
 	)
 	var (
-		onlineCPUSet                  cpuset.CPUSet
 		reservedCPUSet                cpuset.CPUSet
 		isolatedCPUSet                cpuset.CPUSet
 		workerRTNode                  *corev1.Node
@@ -59,7 +58,6 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 		ovsSystemdServices            []string
 		isCgroupV2                    bool
 		isWorkloadPartitioningEnabled bool
-		err                           error
 	)
 
 	BeforeAll(func() {
@@ -95,25 +93,9 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 		Expect(err).ToNot(HaveOccurred(), "Unable to check if workload partitioning is enabled")
 		testlog.Infof("Workload partitioning enabled: %v", isWorkloadPartitioningEnabled)
 
-		Expect(profile.Spec.CPU.Reserved).ToNot(BeNil())
-		reservedCPUSet, err = cpuset.Parse(string(*profile.Spec.CPU.Reserved))
-		Expect(err).ToNot(HaveOccurred(), "Failed to parse reserved CPUs from profile")
+		reservedCPUSet, isolatedCPUSet = parseProfileCPUSets(profile)
 		testlog.Infof("Reserved CPUSet: %s", reservedCPUSet)
-
-		Expect(profile.Spec.CPU.Isolated).ToNot(BeNil())
-		isolatedCPUSet, err = cpuset.Parse(string(*profile.Spec.CPU.Isolated))
-		Expect(err).ToNot(HaveOccurred(), "Failed to parse isolated CPUs from profile")
 		testlog.Infof("Isolated CPUSet: %s", isolatedCPUSet)
-	})
-
-	BeforeEach(func() {
-		By(fmt.Sprintf("Checking the profile %s with cpus %s", profile.Name, cpuSpecToString(profile.Spec.CPU)))
-
-		Expect(profile.Spec.CPU.Isolated).NotTo(BeNil())
-		Expect(profile.Spec.CPU.Reserved).NotTo(BeNil())
-
-		onlineCPUSet, err = nodes.GetOnlineCPUsSet(context.TODO(), workerRTNode)
-		Expect(err).ToNot(HaveOccurred())
 	})
 
 	Describe("[rfe_id: 64006][Dynamic OVS Pinning]", Ordered, Label(string(label.Tier0)), func() {
@@ -158,6 +140,8 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 						Expect(containerCpuset.Equals(reservedCPUSet)).To(BeTrue(),
 							"Under workload partitioning, OVN pod cpuset.cpus should match reserved cpus, got %s expected %s", containerCpuset, reservedCPUSet)
 					} else {
+						onlineCPUSet, err := nodes.GetOnlineCPUsSet(context.TODO(), workerRTNode)
+						Expect(err).ToNot(HaveOccurred())
 						Expect(containerCpuset.Equals(onlineCPUSet)).To(BeTrue(),
 							"Burstable pod containers cpuset.cpus do not match total online cpus, got %s expected %s", containerCpuset, onlineCPUSet)
 					}
@@ -271,6 +255,8 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 			Expect(result).To(Not(BeEmpty()))
 
 			ovsCPUSet := chkOvsCgrpCpuset(workerRTNode)
+			onlineCPUSet, err := nodes.GetOnlineCPUsSet(context.TODO(), workerRTNode)
+			Expect(err).ToNot(HaveOccurred())
 			Expect(ovsCPUSet).To(Equal(onlineCPUSet))
 
 			if isCgroupV2 {
@@ -655,7 +641,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 			It("Verify OVS affinity excludes CPUs pinned by guaranteed pods under workload partitioning", func() {
 				checkCpuCount(ctx, workerRTNode)
 
-				isolatedCPUs := onlineCPUSet.Difference(reservedCPUSet)
+				isolatedCPUs := isolatedCPUSet
 				isolatedCount := isolatedCPUs.Size()
 				if isolatedCount < 2 {
 					Skip("Not enough isolated CPUs to run this test")
@@ -1025,6 +1011,19 @@ func verifyOvsMatchesExpectedWP(ovnAffinity cpuset.CPUSet,
 		"Under WP, OVN container should be restricted to reserved cpus")
 	expected := expectedOvsAffinity(reservedCPUs, isolatedCPUs, guPodCPUs)
 	verifyOvsAffinity(ovsAffinities, expected)
+}
+
+func parseProfileCPUSets(profile *performancev2.PerformanceProfile) (cpuset.CPUSet, cpuset.CPUSet) {
+	GinkgoHelper()
+	Expect(profile.Spec.CPU.Reserved).ToNot(BeNil())
+	reservedCPUSet, err := cpuset.Parse(string(*profile.Spec.CPU.Reserved))
+	Expect(err).ToNot(HaveOccurred(), "Failed to parse reserved CPUs from profile")
+
+	Expect(profile.Spec.CPU.Isolated).ToNot(BeNil())
+	isolatedCPUSet, err := cpuset.Parse(string(*profile.Spec.CPU.Isolated))
+	Expect(err).ToNot(HaveOccurred(), "Failed to parse isolated CPUs from profile")
+
+	return reservedCPUSet, isolatedCPUSet
 }
 
 // createGuPod creates a 2-CPU Guaranteed QoS pod on the given node, waits for
