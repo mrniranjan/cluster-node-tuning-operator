@@ -105,13 +105,26 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 				"tuned CR name owned by a performance profile CR should only be %q", tunedExpectedName)
 		})
 
+		// When a higher-priority Tuned profile wraps the performance profile via include=<pp-profile>,
+		// the active profile name is the wrapper (e.g. ran-du-performance), not the performance profile name.
 		It("[test_id:37127] Node should point to right tuned profile", func() {
+			ctx := context.TODO()
+			expected := expectedActiveProfileName(ctx)
+
 			for _, node := range workerRTNodes {
-				tuned := nodes.TunedForNode(&node, RunningOnSingleNode)
-				activeProfile, err := pods.WaitForPodOutput(context.TODO(), testclient.K8sClient, tuned, []string{"cat", "/etc/tuned/active_profile"})
-				Expect(err).ToNot(HaveOccurred(), "Error getting the tuned active profile")
-				activeProfileName := string(activeProfile)
-				Expect(strings.TrimSpace(activeProfileName)).To(Equal(tunedExpectedName), "active profile name mismatch got %q expected %q", activeProfileName, tunedExpectedName)
+				By(fmt.Sprintf("Checking tuned profile on node %s", node.Name))
+				key := types.NamespacedName{
+					Name:      node.Name,
+					Namespace: components.NamespaceNodeTuningOperator,
+				}
+				Eventually(func(g Gomega) {
+					tunedProfile := &tunedv1.Profile{}
+					g.Expect(testclient.ControlPlaneClient.Get(ctx, key, tunedProfile)).To(Succeed())
+					g.Expect(tunedProfile.Status.TunedProfile).To(Equal(expected),
+						"node %s active tuned profile", node.Name)
+				}).WithTimeout(cluster.ComputeTestTimeout(120*time.Second, RunningOnSingleNode)).
+					WithPolling(testPollInterval * time.Second).
+					To(Succeed())
 			}
 		})
 
@@ -122,7 +135,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 					Namespace: components.NamespaceNodeTuningOperator,
 				}
 				tunedProfile := &tunedv1.Profile{}
-				err := testclient.DataPlaneClient.Get(context.TODO(), key, tunedProfile)
+				err := testclient.ControlPlaneClient.Get(context.TODO(), key, tunedProfile)
 				Expect(err).ToNot(HaveOccurred(), "Failed to get the Tuned profile for node %s", node.Name)
 				degradedCondition := findCondition(tunedProfile.Status.Conditions, "Degraded")
 				Expect(degradedCondition).ToNot(BeNil(), "Degraded condition not found in Tuned profile status")
@@ -1407,4 +1420,24 @@ func findCondition(conditions []tunedv1.StatusCondition, conditionType string) *
 		}
 	}
 	return nil
+}
+
+func expectedActiveProfileName(ctx context.Context) string {
+	GinkgoHelper()
+	performanceProfileName := components.GetComponentName(testutils.PerformanceProfileName, components.ProfileNamePerformance)
+	tunedList := &tunedv1.TunedList{}
+	Expect(testclient.ControlPlaneClient.List(ctx, tunedList)).To(Succeed())
+	for _, tuned := range tunedList.Items {
+		for _, profile := range tuned.Spec.Profile {
+			if profile.Data == nil || profile.Name == nil {
+				continue
+			}
+
+			if strings.Contains(*profile.Data, fmt.Sprintf("include=%s", performanceProfileName)) {
+				testlog.Warningf("performance profile is wrapped by Tuned CR profile %q (profile: %q)", tuned.Name, *profile.Name)
+				return *profile.Name
+			}
+		}
+	}
+	return performanceProfileName
 }
