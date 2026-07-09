@@ -2,13 +2,16 @@ package profile
 
 import (
 	"strconv"
+	"strings"
 
 	"k8s.io/klog/v2"
 
+	apiconfigv1 "github.com/openshift/api/config/v1"
+	mcov1 "github.com/openshift/api/machineconfiguration/v1"
 	performancev2 "github.com/openshift/cluster-node-tuning-operator/pkg/apis/performanceprofile/v2"
 	"github.com/openshift/cluster-node-tuning-operator/pkg/performanceprofile/controller/performanceprofile/components"
-
-	mcov1 "github.com/openshift/api/machineconfiguration/v1"
+	"github.com/openshift/cluster-node-tuning-operator/pkg/performanceprofile/controller/performanceprofile/components/kubeletconfig"
+	"github.com/openshift/cluster-node-tuning-operator/pkg/performanceprofile/controller/performanceprofile/status"
 )
 
 // GetMachineConfigPoolSelector returns the MachineConfigPoolSelector from the CR or a default value calculated based on NodeSelector
@@ -129,4 +132,46 @@ func IsDRAManaged(profile *performancev2.PerformanceProfile) bool {
 		return false
 	}
 	return parsed
+}
+
+// ValidateOvsDpdkCPUsPrerequisites checks that if ovsDpdk CPUs are set,
+// either Workload Partitioning or strict-cpu-reservation is enabled.
+func ValidateOvsDpdkCPUsPrerequisites(profile *performancev2.PerformanceProfile, opts *components.Options, kc *mcov1.KubeletConfig) error {
+	if profile.Spec.CPU == nil || profile.Spec.CPU.OvsDpdk == nil || *profile.Spec.CPU.OvsDpdk == "" {
+		return nil
+	}
+	if opts.MachineConfig.PinningMode != nil && *opts.MachineConfig.PinningMode == apiconfigv1.CPUPartitioningAllNodes {
+		return nil
+	}
+	if kubeletconfig.HasStrictCPUReservation(kc) {
+		return nil
+	}
+	return status.NewOvsDpdkCPUsPrerequisiteError()
+}
+
+// IsCPULoadBalancingDisabledForOvsDpdk checks the annotation to determine
+// if ovsDpdk CPUs should be excluded from the kernel's scheduler load balancing pool.
+func IsCPULoadBalancingDisabledForOvsDpdk(profile *performancev2.PerformanceProfile) bool {
+	if profile.Annotations == nil {
+		return false
+	}
+
+	v, ok := profile.Annotations[performancev2.PerformanceProfileCPULoadBalancingOvsDpdkAnnotation]
+	if !ok {
+		return false
+	}
+
+	return strings.EqualFold(v, "disable")
+}
+
+// SetMissingOptions populates derived Options fields from the profile spec.
+func SetMissingOptions(profile *performancev2.PerformanceProfile, opts *components.Options) {
+	opts.MachineConfig.MixedCPUsEnabled = opts.MixedCPUsFeatureGateEnabled && IsMixedCPUsEnabled(profile)
+	opts.DRAResourceManagement = IsDRAManaged(profile)
+
+	if profile.Spec.CPU != nil && profile.Spec.CPU.OvsDpdk != nil && *profile.Spec.CPU.OvsDpdk != "" {
+		opts.MachineConfig.OvsDpdkCPUs = string(*profile.Spec.CPU.OvsDpdk)
+	}
+
+	opts.MachineConfig.DisableLoadBalancingForOvsDpdk = IsCPULoadBalancingDisabledForOvsDpdk(profile)
 }

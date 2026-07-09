@@ -613,6 +613,16 @@ func (r *PerformanceProfileReconciler) Reconcile(ctx context.Context, req ctrl.R
 			klog.V(2).Infof("PerformanceProfile %q: waiting for bootcmdline ready signal, will be triggered by operator controller", instance.GetName())
 			return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		if _, isOvsDpdkPrereq := err.(*status.OvsDpdkCPUsPrerequisiteError); isOvsDpdkPrereq {
+			klog.Errorf("performance profile %q failed OVS-DPDK CPUs prerequisite check: %v", instance.GetName(), err)
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "Validation failed", "%s", err.Error())
+			conditions := status.GetDegradedConditions(status.ConditionOvsDpdkCPUsPrerequisiteNotMet, err.Error())
+			if statusErr := r.StatusWriter.Update(ctx, instance, conditions); statusErr != nil {
+				klog.Errorf("failed to update performance profile %q status: %v", instance.GetName(), statusErr)
+				return reconcile.Result{RequeueAfter: statusUpdateRequeueAfter}, nil
+			}
+			return reconcile.Result{}, err
+		}
 		klog.Errorf("failed to deploy performance profile %q components: %v", instance.GetName(), err)
 		r.Recorder.Eventf(instance, corev1.EventTypeWarning, "Creation failed", "Failed to create all components: %v", err)
 		conditions := status.GetDegradedConditions(status.ConditionReasonComponentsCreationFailed, err.Error())
