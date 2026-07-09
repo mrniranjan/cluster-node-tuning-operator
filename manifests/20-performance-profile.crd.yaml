@@ -509,6 +509,13 @@ spec:
                         offloads the complexity of cpu load balancing to the application.
                         Defaults to "true"
                       type: boolean
+                    ovsDpdk:
+                      description: |-
+                        OvsDpdk defines a set of CPUs reserved for OVS-DPDK PMD (Poll Mode Driver)
+                        threads, fully isolated from the operating system and Kubernetes scheduling.
+                        WorkloadPartitioning or --strict-cpu-reservation kubelet CPUManager policy
+                        option are a prerequisite for this feature.
+                      type: string
                     isolated:
                       description: |-
                         Isolated defines a set of CPUs that will be used to give to application threads the most execution time possible,

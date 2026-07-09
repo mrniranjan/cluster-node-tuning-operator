@@ -169,6 +169,7 @@ func FuzzValidateCPUs(f *testing.F) {
 			"isolated": func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Isolated = &input },
 			"shared":   func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Shared = &input },
 			"offline":  func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Offlined = &input },
+			"ovsDpdk":  func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.OvsDpdk = &input },
 		}
 
 		for fieldName, setField := range cpuFields {
@@ -296,6 +297,44 @@ var _ = Describe("PerformanceProfile", func() {
 			Expect(errors).NotTo(BeEmpty(), "should have validation error when isolated and shared CPUs have overlap")
 			Expect(errors[0].Error()).To(Or(ContainSubstring("isolated and shared cpus overlap"), ContainSubstring("shared and isolated cpus overlap")))
 		})
+
+		DescribeTable("ovsDpdk CPU overlap validation",
+			func(reserved, isolated, ovsDpdk, offlined, shared string, expectError bool, overlapA, overlapB string) {
+				reservedCPUs := CPUSet(reserved)
+				isolatedCPUs := CPUSet(isolated)
+				ovsDpdkCPUs := CPUSet(ovsDpdk)
+				profile.Spec.CPU.Reserved = &reservedCPUs
+				profile.Spec.CPU.Isolated = &isolatedCPUs
+				profile.Spec.CPU.OvsDpdk = &ovsDpdkCPUs
+				profile.Spec.CPU.Offlined = nil
+				profile.Spec.CPU.Shared = nil
+				if offlined != "" {
+					o := CPUSet(offlined)
+					profile.Spec.CPU.Offlined = &o
+				}
+				if shared != "" {
+					s := CPUSet(shared)
+					profile.Spec.CPU.Shared = &s
+				}
+				errors := profile.validateCPUs()
+				if !expectError {
+					Expect(errors).To(BeEmpty(), "should not have validation errors with non-overlapping ovsDpdk CPUs")
+					return
+				}
+				Expect(errors).NotTo(BeEmpty(), "expected validation error for overlapping ovsDpdk CPUs")
+				Expect(errors[0].Error()).To(Or(ContainSubstring(overlapA), ContainSubstring(overlapB)))
+			},
+			Entry("valid non-overlapping", "0-1", "4-7", "2-3", "", "", false, "", ""),
+			Entry("overlaps with reserved", "0-3", "8-11", "2-5", "", "", true,
+				"ovsDpdk and reserved cpus overlap", "reserved and ovsDpdk cpus overlap"),
+			Entry("overlaps with isolated", "0-1", "4-7", "6-9", "", "", true,
+				"ovsDpdk and isolated cpus overlap", "isolated and ovsDpdk cpus overlap"),
+			Entry("overlaps with offlined", "0-1", "4-5", "2-3,7", "6-7", "", true,
+				"ovsDpdk and offlined cpus overlap", "offlined and ovsDpdk cpus overlap"),
+			Entry("overlaps with shared", "0-1", "4-5", "2-3,6", "", "6-7", true,
+				"ovsDpdk and shared cpus overlap", "shared and ovsDpdk cpus overlap"),
+		)
+
 		DescribeTable("should reject invalid input that does not represent CPU sets",
 			func(fieldSetter func(*PerformanceProfile, CPUSet), cpusField string) {
 				garbageInput := CPUSet("garbage")
@@ -308,6 +347,7 @@ var _ = Describe("PerformanceProfile", func() {
 			Entry("isolated CPUs", func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Isolated = &input }, "isolated CPUs"),
 			Entry("shared CPUs", func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Shared = &input }, "shared CPUs"),
 			Entry("offline CPUs", func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.Offlined = &input }, "offline CPUs"),
+			Entry("ovs dpdk CPUs", func(p *PerformanceProfile, input CPUSet) { p.Spec.CPU.OvsDpdk = &input }, "ovsDpdk CPUs"),
 		)
 	})
 
