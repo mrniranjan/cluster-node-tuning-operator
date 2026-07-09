@@ -96,7 +96,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 
 		ovsSystemdServices = ovsSystemdServicesOnOvsSlice(ctx, workerRTNode)
 
-		isWorkloadPartitioningEnabled, err = cluster.IsWorkloadPartitioningEnabled(ctx)
+		isWorkloadPartitioningEnabled, err = cluster.IsWorkloadPartitioningEnabled(ctx, testclient.Client)
 		Expect(err).ToNot(HaveOccurred(), "Unable to check if workload partitioning is enabled")
 		testlog.Infof("Workload partitioning enabled: %v", isWorkloadPartitioningEnabled)
 
@@ -698,6 +698,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 					err := testclient.DataPlaneClient.Create(ctx, testpod)
 					Expect(err).ToNot(HaveOccurred())
 					testpod, err = pods.WaitForCondition(ctx, client.ObjectKeyFromObject(testpod), corev1.PodReady, corev1.ConditionTrue, 5*time.Minute)
+					pods.DumpStateOnFailure(ctx, testclient.K8sClient, testpod, err)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(testpod.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
 					guPods = append(guPods, testpod)
@@ -1040,6 +1041,7 @@ func createGuPod(ctx context.Context, node *corev1.Node) *corev1.Pod {
 	err := testclient.DataPlaneClient.Create(ctx, testpod)
 	Expect(err).ToNot(HaveOccurred())
 	testpod, err = pods.WaitForCondition(ctx, client.ObjectKeyFromObject(testpod), corev1.PodReady, corev1.ConditionTrue, 5*time.Minute)
+	pods.DumpStateOnFailure(ctx, testclient.K8sClient, testpod, err)
 	Expect(err).ToNot(HaveOccurred())
 	Expect(testpod.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
 	testlog.Infof("GU pod %s pinned to cpus %s", testpod.Name, getGuPodCPUs(ctx, testpod))
