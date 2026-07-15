@@ -727,4 +727,42 @@ var _ = Describe("Tuned", func() {
 			})
 		})
 	})
+
+	Context("with ovs-dpdk cpus", func() {
+		It("should include ovs-dpdk cpus in isolated_cores", func() {
+			ovsDpdkCPUs := performancev2.CPUSet("10-11")
+			profile.Spec.CPU.OvsDpdk = &ovsDpdkCPUs
+			tunedData := getTunedStructuredData(profile, components.ProfileNamePerformance)
+			variables, err := tunedData.GetSection("variables")
+			Expect(err).ToNot(HaveOccurred())
+			isolatedCores := variables.Key("isolated_cores").String()
+			set, err := cpuset.Parse(isolatedCores)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(set.List()).To(ConsistOf(4, 5, 10, 11))
+		})
+
+		It("should union ovs-dpdk cpus into isolated_cores variable", func() {
+			ovsDpdkCPUs := performancev2.CPUSet("10-11")
+			profile.Spec.CPU.OvsDpdk = &ovsDpdkCPUs
+			tunedData := getTunedStructuredData(profile, components.ProfileNamePerformance)
+
+			variables, err := tunedData.GetSection("variables")
+			Expect(err).ToNot(HaveOccurred())
+			isolatedCores := variables.Key("isolated_cores").String()
+			set, err := cpuset.Parse(isolatedCores)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(set.List()).To(ContainElements(10, 11),
+				"isolated_cores should include ovs-dpdk cpus 10-11")
+			Expect(set.List()).ToNot(ContainElements(0, 1, 2, 3),
+				"isolated_cores should not include reserved cpus 0-3")
+
+			bootLoaderSection, err := tunedData.GetSection("bootloader")
+			Expect(err).ToNot(HaveOccurred())
+			cmdlineCpuPart := bootLoaderSection.Key("cmdline_cpu_part").String()
+			Expect(cmdlineCpuPart).To(ContainSubstring("rcu_nocbs=${isolated_cores}"),
+				"rcu_nocbs should reference isolated_cores which includes ovs-dpdk cpus")
+			Expect(cmdlineCpuPart).To(ContainSubstring("systemd.cpu_affinity=${not_isolated_cores_expanded}"),
+				"systemd.cpu_affinity should reference not_isolated_cores_expanded which excludes ovs-dpdk cpus")
+		})
+	})
 })

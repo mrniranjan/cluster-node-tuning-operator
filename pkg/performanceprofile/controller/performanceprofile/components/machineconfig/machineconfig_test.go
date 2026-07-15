@@ -314,7 +314,9 @@ var _ = Describe("Machine Config", func() {
 
 	Context("check systemd units", func() {
 		It("should generate clear-banned-cpus unit", func() {
-			unit, err := getSystemdContent(getIRQBalanceBannedCPUsOptions())
+			irqOpts, err := getIRQBalanceBannedCPUsOptions("")
+			Expect(err).ToNot(HaveOccurred())
+			unit, err := getSystemdContent(irqOpts)
 			Expect(err).ToNot(HaveOccurred())
 			expected := `[Unit]
 Description=Clear the IRQBalance Banned CPU mask early in the boot
@@ -464,6 +466,168 @@ resources = { "cpushares" = 0, "cpuset" = "" }
 			mc, err := BootstrapWorkloadPinningMC("master", nil)
 			Expect(err).To(HaveOccurred())
 			Expect(mc).To(BeNil())
+		})
+	})
+})
+
+var _ = Describe("Machine Config OVS-DPDK CPUs", func() {
+	Context("ovs-dpdk-cpus-configure service and script", func() {
+		It("should create ovs-dpdk-cpus-configure service when ovs-dpdk cpus are specified", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{
+				OvsDpdkCPUs: "4-7",
+			})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			found := false
+			for _, u := range result.Systemd.Units {
+				if u.Name == "ovs-dpdk-cpus-configure.service" {
+					found = true
+					Expect(u.Enabled).ToNot(BeNil())
+					Expect(*u.Enabled).To(BeTrue())
+				}
+			}
+			Expect(found).To(BeTrue(), "ovs-dpdk-cpus-configure.service should be present")
+		})
+
+		It("should create ovs-dpdk-cpus-configure script when ovs-dpdk cpus are specified", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{
+				OvsDpdkCPUs: "4-7",
+			})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			found := false
+			for _, f := range result.Storage.Files {
+				if f.Path == "/usr/local/bin/ovs-dpdk-cpus-configure.sh" {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "ovs-dpdk-cpus-configure.sh script should be present")
+		})
+
+		It("should not create ovs-dpdk-cpus-configure service when ovs-dpdk cpus are not specified", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			for _, u := range result.Systemd.Units {
+				Expect(u.Name).ToNot(Equal("ovs-dpdk-cpus-configure.service"),
+					"ovs-dpdk-cpus-configure.service should not be present when no OVS-DPDK CPUs")
+			}
+		})
+	})
+
+	Context("ovs-vswitchd drop-in with ovs-dpdk cpus", func() {
+		It("should include OVS_DPDK_CPUS environment variable in ovs-vswitchd drop-in when OvsDpdkCPUs is set", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{
+				OvsDpdkCPUs: "4-7",
+			})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			found := false
+			foundDelegate := false
+			for _, f := range result.Storage.Files {
+				if strings.Contains(f.Path, "ovs-vswitchd.service.d") {
+					base64Data := strings.TrimPrefix(*f.Contents.Source, "data:text/plain;charset=utf-8;base64,")
+					decoded, err := base64.StdEncoding.DecodeString(base64Data)
+					Expect(err).ToNot(HaveOccurred())
+					content := string(decoded)
+					if strings.Contains(content, "OVS_DPDK_CPUS=4-7") {
+						found = true
+					}
+					if strings.Contains(content, "Delegate=cpuset cpu pids") {
+						foundDelegate = true
+					}
+				}
+			}
+			Expect(found).To(BeTrue(), "ovs-vswitchd drop-in should contain Environment=OVS_DPDK_CPUS=4-7")
+			Expect(foundDelegate).To(BeTrue(), "ovs-vswitchd drop-in should contain Delegate=cpuset cpu pids")
+		})
+	})
+
+	Context("DisableLoadBalancingForOvsDpdk option", func() {
+		It("should still create OVS slice regardless of DisableLoadBalancingForOvsDpdk", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{
+				OvsDpdkCPUs:                    "4-7",
+				DisableLoadBalancingForOvsDpdk: true,
+			})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			foundOvsSlice := false
+			for _, f := range result.Storage.Files {
+				if strings.Contains(f.Path, ovsSliceName) {
+					foundOvsSlice = true
+					break
+				}
+			}
+			Expect(foundOvsSlice).To(BeTrue(), "OVS slice definition should still be present")
+		})
+	})
+
+	Context("IRQBALANCE_BANNED_CPUS for ovs-dpdk cpus", func() {
+		It("should set IRQBALANCE_BANNED_CPUS when ovs-dpdk cpus are specified", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			ovsDpdkCPUs := performancev2.CPUSet("2-3")
+			profile.Spec.CPU.OvsDpdk = &ovsDpdkCPUs
+			mc, err := New(profile, &components.MachineConfigOptions{
+				OvsDpdkCPUs: "2-3",
+			})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			found := false
+			for _, u := range result.Systemd.Units {
+				if u.Name == "clear-irqbalance-banned-cpus.service" && u.Contents != nil {
+					if strings.Contains(*u.Contents, "OVS_DPDK_CPUS=c") {
+						found = true
+					}
+				}
+			}
+			Expect(found).To(BeTrue(), "OVS_DPDK_CPUS should be set to hex mask of OVS-DPDK CPUs 2-3 (0xc)")
+		})
+
+		It("should not set IRQBALANCE_BANNED_CPUS when ovs-dpdk cpus are not specified", func() {
+			profile := testutils.NewPerformanceProfile("test")
+			mc, err := New(profile, &components.MachineConfigOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			result := igntypes.Config{}
+			err = json.Unmarshal(mc.Spec.Config.Raw, &result)
+			Expect(err).ToNot(HaveOccurred())
+
+			for _, u := range result.Systemd.Units {
+				if u.Name == "clear-irqbalance-banned-cpus.service" && u.Contents != nil {
+					Expect(*u.Contents).ToNot(ContainSubstring("OVS_DPDK_CPUS"),
+						"IRQBALANCE_BANNED_CPUS should not be set when no OVS-DPDK CPUs")
+				}
+			}
 		})
 	})
 })
