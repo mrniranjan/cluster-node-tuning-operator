@@ -41,6 +41,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 	var tunedConfPath, performanceProfileName string
 	var reservedCPUCount int
 	var baselineMultiQueueNICs map[string]map[nodes.NodeInterface]int
+	var configurableMultiQueueNICs map[string]map[nodes.NodeInterface]int
 
 	BeforeAll(func() {
 		if discovery.Enabled() && testutils.ProfileNotFound {
@@ -115,11 +116,14 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 			By("Verifying a non-virtual NIC converged to reserved CPU count")
 			err := waitForAnyNICToMatchReservedCPU(context.TODO(), workerRTNodes, baselineMultiQueueNICs, reservedCPUCount)
 			Expect(err).ToNot(HaveOccurred(), "no NIC matched reserved CPU count %d within timeout", reservedCPUCount)
+
+			configurableMultiQueueNICs = filterNICsByCombinedChannels(discoverMultiQueueNICs(context.TODO(), workerRTNodes), reservedCPUCount)
+			Expect(configurableMultiQueueNICs).ToNot(BeEmpty(), "no NIC remained at reserved CPU count %d", reservedCPUCount)
 		})
 
 		It("[test_id:40543] Add interfaceName and verify the interface netqueues are equal to reserved cpus count.", func() {
-			nodeName, device := getRandomNodeDevice(baselineMultiQueueNICs)
-			testlog.Infof("Selected NIC %s on node %s (combined=%d)", device.Name, nodeName, baselineMultiQueueNICs[nodeName][device])
+			nodeName, device := getRandomNodeDevice(configurableMultiQueueNICs)
+			testlog.Infof("Selected NIC %s on node %s (combined=%d)", device.Name, nodeName, configurableMultiQueueNICs[nodeName][device])
 
 			var err error
 			profile, err = profiles.GetByNodeLabels(testutils.NodeSelectorLabels)
@@ -130,7 +134,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 
 			By("Building target NIC map for selected device")
 			targetNICs := map[string]map[nodes.NodeInterface]int{
-				nodeName: {device: baselineMultiQueueNICs[nodeName][device]},
+				nodeName: {device: configurableMultiQueueNICs[nodeName][device]},
 			}
 
 			By("Adding device filter to profile")
@@ -159,7 +163,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 		})
 
 		It("[test_id:40545] Verify reserved cpus count is applied to specific supported networking devices using wildcard matches", func() {
-			nodeName, device := getRandomNodeDevice(baselineMultiQueueNICs)
+			nodeName, device := getRandomNodeDevice(configurableMultiQueueNICs)
 			devicePattern := device.Name[:len(device.Name)-1] + "*"
 			expectedUdevRegex := device.Name[:len(device.Name)-1] + ".*"
 			testlog.Infof("Selected NIC %s on node %s, wildcard pattern %q, expected udev regex %q", device.Name, nodeName, devicePattern, expectedUdevRegex)
@@ -173,7 +177,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 
 			By("Building matched NIC map for wildcard pattern")
 			matchedNICs := make(map[string]map[nodes.NodeInterface]int)
-			for nodeKey, nics := range baselineMultiQueueNICs {
+			for nodeKey, nics := range configurableMultiQueueNICs {
 				for nic, channels := range nics {
 					matched, err := filepath.Match(devicePattern, nic.Name)
 					Expect(err).ToNot(HaveOccurred())
@@ -216,7 +220,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 			// Remove nodes with only one NIC as that cannot be used to check this behavior
 			// this is done by removing the NIC entries to avoid deleting from the map while iterating
 			nodesWithMultipleNICs := make(map[string]map[nodes.NodeInterface]int)
-			for node, nics := range baselineMultiQueueNICs {
+			for node, nics := range configurableMultiQueueNICs {
 				if len(nics) >= 2 {
 					nodesWithMultipleNICs[node] = nics
 				}
@@ -238,7 +242,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 
 			By("Building expected NIC map excluding negated device")
 			expectedNICs := make(map[string]map[nodes.NodeInterface]int)
-			for nodeKey, nics := range baselineMultiQueueNICs {
+			for nodeKey, nics := range configurableMultiQueueNICs {
 				for nic, channels := range nics {
 					if nic.Name == device.Name {
 						continue
@@ -289,7 +293,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 		})
 
 		It("[test_id:40668] Verify reserved cpu count is added to networking devices matched with vendor and Device id", func() {
-			nodeName, device := getRandomNodeDevice(baselineMultiQueueNICs)
+			nodeName, device := getRandomNodeDevice(configurableMultiQueueNICs)
 
 			var err error
 			profile, err = profiles.GetByNodeLabels(testutils.NodeSelectorLabels)
@@ -305,7 +309,7 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 			By("Building vendor+device ID matched NIC map before profile update (exec calls need node reachable)")
 			matchedNICs := make(map[string]map[nodes.NodeInterface]int)
 			for _, wn := range workerRTNodes {
-				for nic, channels := range baselineMultiQueueNICs[wn.Name] {
+				for nic, channels := range configurableMultiQueueNICs[wn.Name] {
 					nicVid := getVendorID(context.TODO(), wn, nic.Name)
 					nicDid := getDeviceID(context.TODO(), wn, nic.Name)
 					if nicVid == vid && nicDid == did {
@@ -375,6 +379,22 @@ func waitForAnyNICToMatchReservedCPU(ctx context.Context, workerRTNodes []corev1
 			}
 			return false, nil
 		})
+}
+
+func filterNICsByCombinedChannels(allNICs map[string]map[nodes.NodeInterface]int, channels int) map[string]map[nodes.NodeInterface]int {
+	filteredNICs := make(map[string]map[nodes.NodeInterface]int)
+	for nodeName, nics := range allNICs {
+		for nic, combinedChannels := range nics {
+			if combinedChannels != channels {
+				continue
+			}
+			if filteredNICs[nodeName] == nil {
+				filteredNICs[nodeName] = make(map[nodes.NodeInterface]int)
+			}
+			filteredNICs[nodeName][nic] = combinedChannels
+		}
+	}
+	return filteredNICs
 }
 
 // waitForNICsToMatchReservedCPU polls the pre-discovered multi-queue NICs until all
