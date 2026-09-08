@@ -112,8 +112,8 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 
 	Context("Updating performance profile for netqueues", func() {
 		It("[test_id:40308][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Network device queues Should be set to the profile's reserved CPUs count", func() {
-			By("Verifying all non-virtual NICs converged to reserved CPU count")
-			err := waitForNICsToMatchReservedCPU(context.TODO(), workerRTNodes, baselineMultiQueueNICs, reservedCPUCount)
+			By("Verifying a non-virtual NIC converged to reserved CPU count")
+			err := waitForAnyNICToMatchReservedCPU(context.TODO(), workerRTNodes, baselineMultiQueueNICs, reservedCPUCount)
 			Expect(err).ToNot(HaveOccurred(), "no NIC matched reserved CPU count %d within timeout", reservedCPUCount)
 		})
 
@@ -351,6 +351,32 @@ var _ = Describe("[ref_id: 40307][pao]Resizing Network Queues", Ordered, Label(s
 	})
 })
 
+// waitForAnyNICToMatchReservedCPU checks that TuneD configured at least one
+// supported NIC. Some nodes expose physical NICs whose drivers allow querying
+// channels but reject changing them while the device is in use.
+func waitForAnyNICToMatchReservedCPU(ctx context.Context, workerRTNodes []corev1.Node, baselineMultiQueueNICs map[string]map[nodes.NodeInterface]int, reservedCPUCount int) error {
+	nodesByName := make(map[string]corev1.Node, len(workerRTNodes))
+	for _, workerNode := range workerRTNodes {
+		nodesByName[workerNode.Name] = workerNode
+	}
+	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 3*time.Minute, true,
+		func(ctx context.Context) (bool, error) {
+			for nodeName, nodeSupportedNICs := range baselineMultiQueueNICs {
+				node := nodesByName[nodeName]
+				for supportedNIC := range nodeSupportedNICs {
+					channels, err := getCombinedChannels(ctx, node, supportedNIC)
+					if err != nil || channels == 0 {
+						continue
+					}
+					if channels == reservedCPUCount {
+						return true, nil
+					}
+				}
+			}
+			return false, nil
+		})
+}
+
 // waitForNICsToMatchReservedCPU polls the pre-discovered multi-queue NICs until all
 // have their combined channel count equal to reservedCPUCount, indicating TuneD has
 // applied the net queue configuration. Returns an error on timeout.
@@ -423,6 +449,9 @@ func discoverMultiQueueNICs(ctx context.Context, workernodes []corev1.Node) map[
 		testlog.Infof("Discovering multi-queue NICs on %s", node.Name)
 		nodeNICs := make(map[nodes.NodeInterface]int)
 		for _, iface := range interfaces {
+			if !iface.Physical || iface.Name == "" || strings.ContainsAny(iface.Name, " \t\n") {
+				continue
+			}
 			channels, err := getCombinedChannels(ctx, node, iface)
 			if err != nil {
 				testlog.Warningf("%s: Couldn't get combined, skipping: %v", iface.Name, err)
