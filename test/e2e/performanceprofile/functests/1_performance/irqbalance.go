@@ -387,7 +387,7 @@ var _ = Describe("[performance] IRQBalance", Ordered, func() {
 	// Automates OCPBUGS-45112 - Config test
 	// Default StartLimitBurst=5 was too low - each pod created/deleted would trigger a restart of irqbalance
 	// Systemd coalesces concurrent requests, making the reproduction by deployment impractical.
-	It("[test_id:88711] should have irqbalance StartLimitBurst >= 100", Label(string(label.Tier0)), func() {
+	It("[test_id:88711] should have irqbalance StartLimitBurst >= 100", Label(string(label.Tier0), string(label.ReleaseCritical)), func() {
 		startLimitBurst, err := systemd.ShowPropertyValue(context.TODO(), "irqbalance.service", "StartLimitBurst", targetNode)
 		Expect(err).ToNot(HaveOccurred())
 		startLimitBurst = strings.TrimSpace(startLimitBurst)

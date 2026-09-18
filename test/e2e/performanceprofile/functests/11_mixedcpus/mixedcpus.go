@@ -92,7 +92,7 @@ var _ = Describe("Mixedcpus", Ordered, Label(string(label.MixedCPUs)), func() {
 			Expect(found).To(Equal("true"), "file not found; file=%q", kubeletMixedCPUsConfigFile)
 		})
 
-		It("should add Kubelet systemReservedCPUs the shared cpuset", func() {
+		It("should add Kubelet systemReservedCPUs the shared cpuset", Label(string(label.ReleaseCritical)), func() {
 			name := components.GetComponentName(profile.Name, components.ComponentNamePrefix)
 			key := client.ObjectKey{Name: name}
 			kc := &machineconfigv1.KubeletConfig{}
@@ -106,7 +106,7 @@ var _ = Describe("Mixedcpus", Ordered, Label(string(label.MixedCPUs)), func() {
 				reservedSystemCpus.String(), reserved.String(), shared.String())
 		})
 
-		It("should update CRI-O configuration with the given shared cpuset", func() {
+		It("should update CRI-O configuration with the given shared cpuset", Label(string(label.ReleaseCritical)), func() {
 			workers, err := nodes.GetByLabels(testutils.NodeSelectorLabels)
 			Expect(err).ToNot(HaveOccurred())
 			// test arbitrary one should be good enough

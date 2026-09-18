@@ -1,6 +1,7 @@
 package tuned
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -762,6 +763,42 @@ var _ = Describe("Tuned", func() {
 				"rcu_nocbs should reference isolated_cores which includes ovs-dpdk cpus")
 			Expect(cmdlineCpuPart).To(ContainSubstring("systemd.cpu_affinity=${not_isolated_cores_expanded}"),
 				"systemd.cpu_affinity should reference not_isolated_cores_expanded which excludes ovs-dpdk cpus")
+		})
+	})
+
+	Context("with hardware tuning (per-CPU max frequency capping)", func() {
+		// The default test profile has reserved=0-3 and isolated=4-5.
+		It("should render a [sysfs] section capping scaling_max_freq for isolated and reserved cpus", func() {
+			isolatedFreq := performancev2.CPUfrequency(2500000)
+			reservedFreq := performancev2.CPUfrequency(2800000)
+			profile.Spec.HardwareTuning = &performancev2.HardwareTuning{
+				IsolatedCpuFreq: &isolatedFreq,
+				ReservedCpuFreq: &reservedFreq,
+			}
+
+			tunedData := getTunedStructuredData(profile, components.ProfileNamePerformance)
+			sysfsSection, err := tunedData.GetSection("sysfs")
+			Expect(err).ToNot(HaveOccurred(), "[sysfs] section should be rendered when HardwareTuning is set")
+
+			for _, cpu := range []int{4, 5} {
+				key := fmt.Sprintf("/sys/devices/system/cpu/cpufreq/policy%d/scaling_max_freq", cpu)
+				Expect(sysfsSection.HasKey(key)).To(BeTrue(), "expected scaling_max_freq entry for isolated cpu %d", cpu)
+				Expect(sysfsSection.Key(key).String()).To(Equal(strconv.Itoa(int(isolatedFreq))),
+					"isolated cpu %d should be capped at the configured isolated frequency", cpu)
+			}
+			for _, cpu := range []int{0, 1, 2, 3} {
+				key := fmt.Sprintf("/sys/devices/system/cpu/cpufreq/policy%d/scaling_max_freq", cpu)
+				Expect(sysfsSection.HasKey(key)).To(BeTrue(), "expected scaling_max_freq entry for reserved cpu %d", cpu)
+				Expect(sysfsSection.Key(key).String()).To(Equal(strconv.Itoa(int(reservedFreq))),
+					"reserved cpu %d should be capped at the configured reserved frequency", cpu)
+			}
+		})
+
+		It("should not render any scaling_max_freq entries when HardwareTuning is not set", func() {
+			Expect(profile.Spec.HardwareTuning).To(BeNil())
+			manifest := getTunedManifest(profile)
+			Expect(manifest).ToNot(ContainSubstring("scaling_max_freq"),
+				"no per-CPU frequency capping should be rendered without HardwareTuning")
 		})
 	})
 })

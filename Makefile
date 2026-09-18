@@ -219,6 +219,21 @@ pao-functests-only: $(BINDATA)
 	hack/show-cluster-version.sh
 	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/1_performance test/e2e/performanceprofile/functests/6_mustgather_testing test/e2e/performanceprofile/functests/10_performance_ppc" -p "-v -r --flake-attempts=2 --junit-report=report.xml" -m "Running Functional Tests"
 
+.PHONY: pao-functests-release-critical
+pao-functests-release-critical: cluster-label-worker-cnf pao-functests-release-critical-only
+
+# Time-boxed critical lane: runs only specs tagged release-critical (label.ReleaseCritical).
+# Deterministic and CPU-count independent - it selects by label, not by node size, so it
+# behaves the same on the 4-CPU upstream VMs as on larger clusters. 0_config is included
+# because its profile-apply spec is itself tagged release-critical (every other lane depends
+# on it). Reboot-heavy suites (ovsdpdk, nodeSelector, latency, memorymanager) are excluded by
+# not tagging their specs, keeping this lane well under the hard CI time limit.
+.PHONY: pao-functests-release-critical-only
+pao-functests-release-critical-only: $(BINDATA)
+	@echo "Cluster Version"
+	hack/show-cluster-version.sh
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/1_performance test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/6_mustgather_testing test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/8_performance_workloadhints test/e2e/performanceprofile/functests/10_performance_ppc test/e2e/performanceprofile/functests/11_mixedcpus" -p "-v -r --label-filter='release-critical && !hypershift' --fail-fast --flake-attempts=2 --timeout=90m --junit-report=report.xml" -m "Running Release-Critical Functional Tests"
+
 .PHONY: pao-functests-updating-profile
 pao-functests-updating-profile: cluster-label-worker-cnf pao-functests-update-only
 

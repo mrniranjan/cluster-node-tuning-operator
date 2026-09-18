@@ -110,6 +110,43 @@ func TestGetTwoSiblingsFromCPUSet(t *testing.T) {
 	}
 }
 
+func TestGetNumaRanges(t *testing.T) {
+	tests := []struct {
+		name      string
+		cpuString string
+		want      string
+	}{
+		{
+			name:      "interleaved ranges",
+			cpuString: "42,3,43,4,44,5,45,6,47,7",
+			want:      "3-7,42-45,47",
+		},
+		{
+			name:      "multiple contiguous ranges with singleton",
+			cpuString: "10,11,12,13,14,15,16,19,20,21,22,23,24,32",
+			want:      "10-16,19-24,32",
+		},
+		{
+			name:      "short range followed by singletons",
+			cpuString: "10,31,11,32,12,33,13,34,14,35",
+			want:      "10-14,31,32,33,34,35",
+		},
+		{
+			name:      "two ranges and a singleton",
+			cpuString: "1,2,3,4,9,10,11,12,32",
+			want:      "1-4,9-12,32",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetNumaRanges(tt.cpuString)
+			if got != tt.want {
+				t.Errorf("GetNumaRanges(%q) = %q, want %q", tt.cpuString, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindCmdlineParam(t *testing.T) {
 	tests := []struct {
 		name    string

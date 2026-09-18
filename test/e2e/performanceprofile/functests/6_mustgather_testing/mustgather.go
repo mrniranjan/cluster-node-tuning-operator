@@ -57,7 +57,7 @@ var _ = Describe("[rfe_id: 50649] Performance Addon Operator Must Gather", Label
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("Verify PAO cluster resources are captured", func() {
+		It("Verify PAO cluster resources are captured", Label(string(label.ReleaseCritical)), func() {
 			profile, _ := profiles.GetByNodeLabels(testutils.NodeSelectorLabels)
 			if profile == nil {
 				Skip("No Performance Profile found")
@@ -110,25 +110,6 @@ var _ = Describe("[rfe_id: 50649] Performance Addon Operator Must Gather", Label
 			if err != nil {
 				log.Println(err)
 			}
-
-			// Two different folders for must-gather info, first one with generated file and second one tmp folder with unzip info from sysinfo.tgz
-			// find the path of must-gather node files
-			snapShotName = ""
-			err = filepath.Walk(mgContentFolder,
-				func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					if !info.IsDir() && info.Name() == "sysinfo.tgz" {
-						if strings.Contains(path, cnfWorkerNode) {
-							snapShotName = path
-						}
-					}
-					return nil
-				})
-			if err != nil {
-				log.Println(err)
-			}
 			snapShotPath := filepath.Dir(snapShotName)
 
 			nodeSpecificFiles := []string{
@@ -162,7 +143,7 @@ var _ = Describe("[rfe_id: 50649] Performance Addon Operator Must Gather", Label
 			mcps := &machineconfigv1.MachineConfigPoolList{}
 			err := testclient.ControlPlaneClient.List(context.TODO(), mcps)
 			Expect(err).ToNot(HaveOccurred())
-			mcpFiles := make([]string, len(mcps.Items))
+			mcpFiles := make([]string, 0, len(mcps.Items))
 			for _, item := range mcps.Items {
 				mcpFiles = append(mcpFiles, fmt.Sprintf("cluster-scoped-resources/machineconfiguration.openshift.io/machineconfigpools/%s.yaml", item.Name))
 			}

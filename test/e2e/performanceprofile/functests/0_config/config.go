@@ -45,7 +45,7 @@ var _ = Describe("[performance][config] Performance configuration", Ordered, fun
 		RunningOnSingleNode = isSNO
 	})
 
-	It("Should successfully deploy the performance profile", Label(string(label.Tier0)), func() {
+	It("Should successfully deploy the performance profile", Label(string(label.Tier0), string(label.ReleaseCritical)), func() {
 
 		performanceProfile, err := testProfile()
 		Expect(err).ToNot(HaveOccurred(), "failed to build performance profile: %v", err)

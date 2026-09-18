@@ -98,7 +98,7 @@ var _ = Describe("Status testing of performance profile", Ordered, func() {
 			Expect(*profile.Status.RuntimeClass).To(Equal(runtimeClass.Name))
 		})
 
-		It("[test_id:29673] Machine config pools status tied to Performance Profile", Label(string(label.OpenShift)), func() {
+		It("[test_id:29673] Machine config pools status tied to Performance Profile", Label(string(label.OpenShift), string(label.ReleaseCritical)), func() {
 			// Creating bad MC that leads to degraded state
 			By("Creating bad MachineConfig")
 			badMC := createBadMachineConfig("bad-mc")
@@ -123,7 +123,7 @@ var _ = Describe("Status testing of performance profile", Ordered, func() {
 			mcps.WaitForCondition(performanceMCP, machineconfigv1.MachineConfigPoolUpdated, corev1.ConditionTrue)
 		})
 
-		It("[test_id:40402] Tuned profile status tied to Performance Profile", func() {
+		It("[test_id:40402] Tuned profile status tied to Performance Profile", Label(string(label.ReleaseCritical)), func() {
 			// During this test we're creating additional synthetic tuned CR by invoking the createrBadTuned function.
 			// This synthetic tuned will look for a tuned profile which doesn't exist.
 			// This tuned CR will be applied on the profiles.tuned.openshift.io CR (there is such profile per node)
@@ -216,7 +216,7 @@ var _ = Describe("Status testing of performance profile", Ordered, func() {
 	})
 
 	Context("ovsDpdk CPUs prerequisites", Label(string(label.OvsDpdk), string(label.OpenShift), string(label.Tier2)), func() {
-		It("should report Degraded when workload partitioning is disabled", func() {
+		It("should report Degraded when workload partitioning is disabled", Label(string(label.ReleaseCritical)), func() {
 			ctx := context.TODO()
 
 			isWPEnabled, err := cluster.IsWorkloadPartitioningEnabled(ctx, testclient.Client)

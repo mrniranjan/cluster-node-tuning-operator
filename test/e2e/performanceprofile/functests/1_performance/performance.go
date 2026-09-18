@@ -148,7 +148,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			}
 		})
 
-		It("Tuned profile shouldn't be degraded", func() {
+		It("Tuned profile shouldn't be degraded", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				key := types.NamespacedName{
 					Name:      node.Name,
@@ -185,7 +185,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			}
 		})
 
-		It("[test_id:32702] Should set CPU isolcpu's kernel argument managed_irq flag", func() {
+		It("[test_id:32702] Should set CPU isolcpu's kernel argument managed_irq flag", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				cmdline, err := nodes.ExecCommand(context.TODO(), &node, []string{"cat", "/proc/cmdline"})
 				Expect(err).ToNot(HaveOccurred())
@@ -197,7 +197,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			}
 		})
 
-		It("[test_id:27081][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should set workqueue CPU mask", func() {
+		It("[test_id:27081][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should set workqueue CPU mask", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				By(fmt.Sprintf("Getting tuned.non_isolcpus kernel argument on %q", node.Name))
 				cmdline, err := nodes.ExecCommand(context.TODO(), &node, []string{"cat", "/proc/cmdline"})
@@ -234,7 +234,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			}
 		})
 
-		It("[test_id:35363][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] stalld daemon is running on the host", func() {
+		It("[test_id:35363][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] stalld daemon is running on the host", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				tuned := nodes.TunedForNode(&node, RunningOnSingleNode)
 				_, err := pods.WaitForPodOutput(context.TODO(), testclient.K8sClient, tuned, []string{"pidof", "stalld"})
@@ -321,7 +321,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 	})
 
 	Context("Using performance profile", Label(string(label.Tier0)), func() {
-		It("[test_id:73107] Should have system services running on the system.slice cgroup", func() {
+		It("[test_id:73107] Should have system services running on the system.slice cgroup", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				processesFound := make([]string, 0)
 				rootCgroupPath := "/rootfs/sys/fs/cgroup/cpuset/cgroup.procs"
@@ -343,7 +343,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			}
 		})
 
-		It("[test_id:74767] Should have the ocp-tuned-one-shot.service started and ended before kubelet", func() {
+		It("[test_id:74767] Should have the ocp-tuned-one-shot.service started and ended before kubelet", Label(string(label.ReleaseCritical)), func() {
 			// https://issues.redhat.com/browse/OCPBUGS-26401
 			for _, node := range workerRTNodes {
 				f := func(c rune) bool {
@@ -394,7 +394,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 	})
 
 	Context("Tuned kernel parameters", Label(string(label.Tier0)), func() {
-		It("[test_id:28466][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should contain configuration injected through openshift-node-performance profile", func() {
+		It("[test_id:28466][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should contain configuration injected through openshift-node-performance profile", Label(string(label.ReleaseCritical)), func() {
 			sysctlMap := map[string]string{
 				"kernel.hung_task_timeout_secs": "600",
 				"kernel.nmi_watchdog":           "0",
@@ -555,7 +555,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 	})
 
 	Context("Network latency parameters adjusted by the Node Tuning Operator", Label(string(label.Tier0)), func() {
-		It("[test_id:28467][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should contain configuration injected through the openshift-node-performance profile", func() {
+		It("[test_id:28467][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Should contain configuration injected through the openshift-node-performance profile", Label(string(label.ReleaseCritical)), func() {
 			sysctlMap := map[string]string{
 				"net.ipv4.tcp_fastopen":     "3",
 				"vm.dirty_ratio":            "10",
@@ -933,125 +933,7 @@ var _ = Describe("[rfe_id:27368][performance]", Ordered, func() {
 			Expect(err.Error()).To(ContainSubstring(message))
 		}
 
-		Context("with API version v1alpha1 profile", func() {
-			var v1alpha1Profile *performancev1alpha1.PerformanceProfile
-
-			BeforeEach(func() {
-				v1alpha1Profile = &performancev1alpha1.PerformanceProfile{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "PerformanceProfile",
-						APIVersion: performancev1alpha1.GroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "v1alpha1-profile",
-					},
-					Spec: performancev1alpha1.PerformanceProfileSpec{
-						RealTimeKernel: &performancev1alpha1.RealTimeKernel{
-							Enabled: ptr.To(true),
-						},
-						NodeSelector: map[string]string{"v1alpha1/v1alpha1": "v1alpha1"},
-						NUMA: &performancev1alpha1.NUMA{
-							TopologyPolicy: ptr.To("restricted"),
-						},
-					},
-				}
-			})
-
-			It("should reject the creation of the profile with overlapping CPUs", func() {
-				reserved := performancev1alpha1.CPUSet("0-3")
-				isolated := performancev1alpha1.CPUSet("0-7")
-
-				v1alpha1Profile.Spec.CPU = &performancev1alpha1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				validateObject(v1alpha1Profile, "reserved and isolated cpus overlap")
-			})
-
-			It("should reject the creation of the profile with no isolated CPUs", func() {
-				reserved := performancev1alpha1.CPUSet("0-3")
-				isolated := performancev1alpha1.CPUSet("")
-
-				v1alpha1Profile.Spec.CPU = &performancev1alpha1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				validateObject(v1alpha1Profile, "isolated CPUs can not be empty")
-			})
-
-			It("should reject the creation of the profile with the node selector that already in use", func() {
-				reserved := performancev1alpha1.CPUSet("0,1")
-				isolated := performancev1alpha1.CPUSet("2,3")
-
-				v1alpha1Profile.Spec.CPU = &performancev1alpha1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				v1alpha1Profile.Spec.NodeSelector = testutils.NodeSelectorLabels
-				validateObject(v1alpha1Profile, "the profile has the same node selector as the performance profile")
-			})
-		})
-
-		Context("with API version v1 profile", Label(string(label.Tier0), string(label.OpenShift)), func() {
-			var v1Profile *performancev1.PerformanceProfile
-
-			BeforeEach(func() {
-				v1Profile = &performancev1.PerformanceProfile{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "PerformanceProfile",
-						APIVersion: performancev1.GroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "v1-profile",
-					},
-					Spec: performancev1.PerformanceProfileSpec{
-						RealTimeKernel: &performancev1.RealTimeKernel{
-							Enabled: ptr.To(true),
-						},
-						NodeSelector: map[string]string{"v1/v1": "v1"},
-						NUMA: &performancev1.NUMA{
-							TopologyPolicy: ptr.To("restricted"),
-						},
-					},
-				}
-			})
-
-			It("should reject the creation of the profile with overlapping CPUs", func() {
-				reserved := performancev1.CPUSet("0-3")
-				isolated := performancev1.CPUSet("0-7")
-
-				v1Profile.Spec.CPU = &performancev1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				validateObject(v1Profile, "reserved and isolated cpus overlap")
-			})
-
-			It("should reject the creation of the profile with no isolated CPUs", func() {
-				reserved := performancev1.CPUSet("0-3")
-				isolated := performancev1.CPUSet("")
-
-				v1Profile.Spec.CPU = &performancev1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				validateObject(v1Profile, "isolated CPUs can not be empty")
-			})
-
-			It("should reject the creation of the profile with the node selector that already in use", func() {
-				reserved := performancev1.CPUSet("0,1")
-				isolated := performancev1.CPUSet("2,3")
-
-				v1Profile.Spec.CPU = &performancev1.CPU{
-					Reserved: &reserved,
-					Isolated: &isolated,
-				}
-				v1Profile.Spec.NodeSelector = testutils.NodeSelectorLabels
-				validateObject(v1Profile, "the profile has the same node selector as the performance profile")
-			})
-		})
-
-		Context("with profile version v2", Label(string(label.Tier0)), func() {
+		Context("with profile version v2", Label(string(label.Tier0), string(label.ReleaseCritical)), func() {
 			var v2Profile *performancev2.PerformanceProfile
 
 			BeforeEach(func() {

@@ -673,7 +673,7 @@ var _ = Describe("[rfe_id:49062][workloadHints] Telco friendly workload specific
 				wg.Wait()
 			})
 
-			It("[test_id:54184] Verify enabling both HighPowerConsumption and PerPodPowerManagment fails", Label(string(label.Tier0)), func() {
+			It("[test_id:54184] Verify enabling both HighPowerConsumption and PerPodPowerManagment fails", Label(string(label.Tier0), string(label.ReleaseCritical)), func() {
 				profile.Spec.WorkloadHints = &performancev2.WorkloadHints{
 					PerPodPowerManagement: ptr.To(true),
 					HighPowerConsumption:  ptr.To(true),

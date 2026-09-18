@@ -9,6 +9,7 @@ import (
 	performancev2 "github.com/openshift/cluster-node-tuning-operator/pkg/apis/performanceprofile/v2"
 	testutils "github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/discovery"
+	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/label"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/nodes"
 	"github.com/openshift/cluster-node-tuning-operator/test/e2e/performanceprofile/functests/utils/profiles"
 
@@ -35,7 +36,7 @@ var _ = Describe("[rfe_id:27350][performance]Topology Manager", Ordered, func() 
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	It("[test_id:26932][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] should be enabled with the policy specified in profile", func() {
+	It("[test_id:26932][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] should be enabled with the policy specified in profile", Label(string(label.ReleaseCritical)), func() {
 		kubeletConfig, err := nodes.GetKubeletConfig(context.TODO(), &workerRTNodes[0])
 		Expect(err).ToNot(HaveOccurred())
 

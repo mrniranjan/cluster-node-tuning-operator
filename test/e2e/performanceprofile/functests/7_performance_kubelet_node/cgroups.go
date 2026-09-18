@@ -109,7 +109,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 
 	Describe("[rfe_id: 64006][Dynamic OVS Pinning]", Ordered, Label(string(label.Tier0)), func() {
 		Context("[Performance Profile applied]", func() {
-			It("[test_id:64097] Activation file is created", func() {
+			It("[test_id:64097] Activation file is created", Label(string(label.ReleaseCritical)), func() {
 				cmd := []string{"ls", activation_file}
 				for _, node := range workerRTNodes {
 					output, err := nodes.ExecCommand(context.TODO(), &node, cmd)
@@ -119,7 +119,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 				}
 			})
 
-			It("[test_id:73046] Verify ovn kube node pod have their cpuset.cpus set to all available cpus", func() {
+			It("[test_id:73046] Verify ovn kube node pod have their cpuset.cpus set to all available cpus", Label(string(label.ReleaseCritical)), func() {
 				ovnKubenodepod, err := ovnCnfNodePod(ctx, workerRTNode)
 				Expect(err).ToNot(HaveOccurred())
 				containerIds, err := ovnPodContainers(&ovnKubenodepod)
@@ -258,7 +258,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 	Describe("Affinity", func() {
 		var ctx context.Context = context.TODO()
 		Context("ovn-kubenode Pods affinity ", Label(string(label.Tier2)), func() {
-			It("[test_id:64100] matches with ovs process affinity", func() {
+			It("[test_id:64100] matches with ovs process affinity", Label(string(label.ReleaseCritical)), func() {
 				By("Collecting OVN container and OVS process affinities")
 				ovnAffinity := getOvnContainerAffinity(ctx, workerRTNode)
 				ovsAffinities := getOvsAffinities(ctx, ovsSystemdServices, workerRTNode)
@@ -272,7 +272,7 @@ var _ = Describe("[performance] Cgroups and affinity", Ordered, Label(string(lab
 					})
 			})
 
-			It("[test_id:64101] Creating gu pods modifies affinity of ovs", func() {
+			It("[test_id:64101] Creating gu pods modifies affinity of ovs", Label(string(label.ReleaseCritical)), func() {
 				By("Creating a guaranteed pod on the worker node")
 				testpod := createGuPod(ctx, workerRTNode)
 

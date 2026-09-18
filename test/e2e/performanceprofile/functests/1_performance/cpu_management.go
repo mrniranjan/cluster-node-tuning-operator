@@ -123,7 +123,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 	})
 
 	Describe("Verification of configuration on the worker node", Label(string(label.Tier0)), func() {
-		It("[test_id:28528][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU reservation on the node", func() {
+		It("[test_id:28528][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU reservation on the node", Label(string(label.ReleaseCritical)), func() {
 			By(fmt.Sprintf("Allocatable CPU should be less than capacity by %d", len(listReservedCPU)))
 			capacityCPU, _ := workerRTNode.Status.Capacity.Cpu().AsInt64()
 			allocatableCPU, _ := workerRTNode.Status.Allocatable.Cpu().AsInt64()
@@ -133,7 +133,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 			Expect(differenceCPUGot).To(Equal(differenceCPUExpected), "Allocatable CPU %d should be less than capacity %d by %d; got %d instead", allocatableCPU, capacityCPU, differenceCPUExpected, differenceCPUGot)
 		})
 
-		It("[test_id:37862][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU affinity mask, CPU reservation and CPU isolation on worker node", func() {
+		It("[test_id:37862][crit:high][vendor:cnf-qe@redhat.com][level:acceptance] Verify CPU affinity mask, CPU reservation and CPU isolation on worker node", Label(string(label.ReleaseCritical)), func() {
 			By("checking isolated CPU")
 			cmd := []string{"cat", "/sys/devices/system/cpu/isolated"}
 			out, err := nodes.ExecCommand(context.TODO(), workerRTNode, cmd)
@@ -168,7 +168,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 			Expect(reservedCPUSet.IsSubsetOf(maskSet)).To(Equal(true), fmt.Sprintf("The init process (pid 1) should have cpu affinity: %s", reservedCPU))
 		})
 
-		It("[test_id:87722][crit:high][level:acceptance] verify Infrastructure pods have cpu affinity of reserved plus isolated cpuset", func() {
+		It("[test_id:87722][crit:high][level:acceptance] verify Infrastructure pods have cpu affinity of reserved plus isolated cpuset", Label(string(label.ReleaseCritical)), func() {
 			// we use tuned pod as an example for Infrastructure pods,
 			// when workload partitioning is enabled or strict cpu reservation is enabled
 			// infrastructure pods have cpu affinity matching reserved cpu otherwise
@@ -405,91 +405,6 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 		})
 	})
 
-	Describe("Verification that IRQ load balance can be disabled per POD", Label(string(label.Tier0)), func() {
-		var smtLevel int
-		var testpod *corev1.Pod
-
-		BeforeEach(func() {
-			Skip("part of interrupts does not support CPU affinity change because of underlying hardware")
-
-			if profile.Spec.GloballyDisableIrqLoadBalancing != nil && *profile.Spec.GloballyDisableIrqLoadBalancing {
-				Skip("IRQ load balance should be enabled (GloballyDisableIrqLoadBalancing=false), skipping test")
-			}
-
-			cpuID := onlineCPUSet.UnsortedList()[0]
-			smtLevel, err = nodes.GetSMTLevel(context.TODO(), cpuID, workerRTNode)
-			Expect(err).ToNot(HaveOccurred(), "Unable to fetch SMT level on node %s, Error: %v", workerRTNode.Name, err)
-		})
-
-		AfterEach(func() {
-			if testpod != nil {
-				Expect(pods.DeleteAndSync(context.TODO(), testclient.DataPlaneClient, testpod)).To(Succeed())
-			}
-		})
-
-		It("[test_id:36364] should disable IRQ balance for CPU where POD is running", func() {
-			By("checking default smp affinity is equal to all active CPUs")
-			defaultSmpAffinitySet, err := nodes.GetDefaultSmpAffinitySet(context.TODO(), workerRTNode)
-			Expect(err).ToNot(HaveOccurred())
-
-			onlineCPUsSet, err := nodes.GetOnlineCPUsSet(context.TODO(), workerRTNode)
-			Expect(err).ToNot(HaveOccurred())
-
-			Expect(onlineCPUsSet.IsSubsetOf(defaultSmpAffinitySet)).To(BeTrue(), "All online CPUs %s should be subset of default SMP affinity %s", onlineCPUsSet, defaultSmpAffinitySet)
-
-			By("Running pod with annotations that disable specific CPU from IRQ balancer")
-			annotations := map[string]string{
-				"irq-load-balancing.crio.io": "disable",
-				"cpu-quota.crio.io":          "disable",
-			}
-			testpod = getTestPodWithAnnotations(annotations, smtLevel)
-
-			err = testclient.DataPlaneClient.Create(context.TODO(), testpod)
-			Expect(err).ToNot(HaveOccurred())
-			testpod, err = pods.WaitForCondition(context.TODO(), client.ObjectKeyFromObject(testpod), corev1.PodReady, corev1.ConditionTrue, 10*time.Minute)
-			logEventsForPod(testpod)
-			Expect(err).ToNot(HaveOccurred())
-
-			By("Checking that the default smp affinity mask was updated and CPU (where POD is running) isolated")
-			defaultSmpAffinitySet, err = nodes.GetDefaultSmpAffinitySet(context.TODO(), workerRTNode)
-			Expect(err).ToNot(HaveOccurred())
-
-			getPsr := []string{"/bin/bash", "-c", "grep Cpus_allowed_list /proc/self/status | awk '{print $2}'"}
-			psr, err := pods.WaitForPodOutput(context.TODO(), testclient.K8sClient, testpod, getPsr)
-			Expect(err).ToNot(HaveOccurred())
-			psrSet, err := cpuset.Parse(strings.Trim(string(psr), "\n"))
-			Expect(err).ToNot(HaveOccurred())
-
-			Expect(psrSet.IsSubsetOf(defaultSmpAffinitySet)).To(BeFalse(), fmt.Sprintf("Default SMP affinity should not contain isolated CPU %s", psr))
-
-			By("Checking that there are no any active IRQ on isolated CPU")
-			// It may takes some time for the system to reschedule active IRQs
-			Eventually(func() bool {
-				getActiveIrq := []string{"/bin/bash", "-c", "for n in $(find /proc/irq/ -name smp_affinity_list); do echo $(cat $n); done"}
-				out, err := nodes.ExecCommand(context.TODO(), workerRTNode, getActiveIrq)
-				Expect(err).ToNot(HaveOccurred())
-				activeIrq := testutils.ToString(out)
-				Expect(activeIrq).ToNot(BeEmpty())
-				for _, irq := range strings.Split(activeIrq, "\n") {
-					irqAffinity, err := cpuset.Parse(irq)
-					Expect(err).ToNot(HaveOccurred())
-					if !irqAffinity.Equals(onlineCPUsSet) && psrSet.IsSubsetOf(irqAffinity) {
-						return false
-					}
-				}
-				return true
-			}).WithTimeout(cluster.ComputeTestTimeout(30*time.Second, RunningOnSingleNode)).WithPolling(5*time.Second).Should(BeTrue(),
-				fmt.Sprintf("IRQ still active on CPU%s", psr))
-
-			By("Checking that after removing POD default smp affinity is returned back to all active CPUs")
-			Expect(pods.DeleteAndSync(context.TODO(), testclient.DataPlaneClient, testpod)).To(Succeed())
-			defaultSmpAffinitySet, err = nodes.GetDefaultSmpAffinitySet(context.TODO(), workerRTNode)
-			Expect(err).ToNot(HaveOccurred())
-
-			Expect(onlineCPUsSet.IsSubsetOf(defaultSmpAffinitySet)).To(BeTrue(), "All online CPUs %s should be subset of default SMP affinity %s", onlineCPUsSet, defaultSmpAffinitySet)
-		})
-	})
-
 	When("reserved CPUs specified", Label(string(label.Tier0)), func() {
 		var testpod *corev1.Pod
 
@@ -694,7 +609,7 @@ var _ = Describe("[rfe_id:27363][performance] CPU Management", Ordered, func() {
 	})
 	// Automates OCPBUGS-34812: cgroupsv2: failed to write on cpuset.cpus.exclusive
 	Context("Cgroupsv2", func() {
-		It("[test_id:75327] cpus from deleted cgroup can be reassigned to new cgroup", Label(string(label.Tier0)), func() {
+		It("[test_id:75327] cpus from deleted cgroup can be reassigned to new cgroup", Label(string(label.Tier0), string(label.ReleaseCritical)), func() {
 
 			// we need system with more than 10 cpus to execute this test
 			if len(onlineCPUSet.List()) < 10 {

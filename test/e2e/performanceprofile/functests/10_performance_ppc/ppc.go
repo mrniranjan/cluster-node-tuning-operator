@@ -73,7 +73,7 @@ var _ = Describe("[rfe_id: 38968] PerformanceProfile setup helper and platform a
 			"performance-profile-creator",
 			"-v",
 		}
-		It("[test_id:40940] Performance Profile regression tests", func() {
+		It("[test_id:40940] Performance Profile regression tests", Label(string(label.ReleaseCritical)), func() {
 			pp := &performancev2.PerformanceProfile{}
 			var reservedCpuCount = 2
 			cmdArgs := []string{
@@ -175,7 +175,7 @@ var _ = Describe("[rfe_id: 38968] PerformanceProfile setup helper and platform a
 			Eventually(session).Should(gexec.Exit(1))
 		})
 
-		It("[test_id: 54187] PPC generates profile with PerPodPowerManagement workload hint", func() {
+		It("[test_id: 54187] PPC generates profile with PerPodPowerManagement workload hint", Label(string(label.ReleaseCritical)), func() {
 			pp := &performancev2.PerformanceProfile{}
 			cmdArgs := []string{
 				fmt.Sprintf("%s:%s:z", mustgatherDir, mustgatherDir),

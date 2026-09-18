@@ -305,7 +305,7 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 				}
 			}
 		},
-			Entry("[test_id:34081] verify that hugepages size and count updated", context.TODO(), chkCmdLineFn, []string{"default_hugepagesz=2M", "hugepagesz=1G", "hugepages=3"}, true, false),
+			Entry("[test_id:34081] verify that hugepages size and count updated", Label(string(label.ReleaseCritical)), context.TODO(), chkCmdLineFn, []string{"default_hugepagesz=2M", "hugepagesz=1G", "hugepages=3"}, true, false),
 			Entry("[test_id:28070] verify that hugepages updated (NUMA node unspecified)", context.TODO(), chkCmdLineFn, []string{"hugepagesz=2M"}, true, false),
 			Entry("verify that the right number of hugepages 1G is available on the system", context.TODO(), chkHugepages1GFn, []string{"3"}, true, false),
 			Entry("verify that the right number of hugepages 2M is available on the system", context.TODO(), chkHugepages2MFn, []string{"256"}, true, false),
@@ -328,7 +328,7 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 			}
 		})
 
-		It("[test_id:28071] verify that isolcpus matches the performance profile", func() {
+		It("[test_id:28071] verify that isolcpus matches the performance profile", Label(string(label.ReleaseCritical)), func() {
 			Expect(profile.Spec.CPU).ToNot(BeNil())
 			expectedPrefix := "managed_irq,"
 			if profile.Spec.CPU.BalanceIsolated != nil && !*profile.Spec.CPU.BalanceIsolated {
@@ -345,7 +345,7 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 			}
 		})
 
-		It("[test_id:28071] verify that systemd.cpu_affinity matches non-isolated CPUs", func() {
+		It("[test_id:28071] verify that systemd.cpu_affinity matches non-isolated CPUs", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				onlineCPUs, err := nodes.GetOnlineCPUsSet(context.TODO(), &node)
 				Expect(err).ToNot(HaveOccurred())
@@ -377,7 +377,7 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 			Entry("[test_id:28760] verify that topologyManager was updated", context.TODO(), chkKubeletConfigFn, func(k *kubeletconfigv1beta1.KubeletConfiguration) string { return k.TopologyManagerPolicy }, "best-effort"),
 		)
 
-		It("[test_id:28935] verify that reservedSystemCPUs matches the performance profile", func() {
+		It("[test_id:28935] verify that reservedSystemCPUs matches the performance profile", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				result, err := chkKubeletConfigFn(context.TODO(), &node)
 				Expect(err).ToNot(HaveOccurred())
@@ -392,7 +392,7 @@ var _ = Describe("[rfe_id:28761][performance] Updating parameters in performance
 			}
 		})
 
-		It("[test_id:27738] should succeed to disable the RT kernel", func() {
+		It("[test_id:27738] should succeed to disable the RT kernel", Label(string(label.ReleaseCritical)), func() {
 			for _, node := range workerRTNodes {
 				err := nodes.HasPreemptRTKernel(context.TODO(), &node)
 				Expect(err).To(HaveOccurred())

@@ -94,7 +94,7 @@ var _ = Describe("[ref_id: 45487][performance]additional kubelet arguments", Ord
 			}
 		})
 		Context("When setting cpu manager related parameters", func() {
-			It("[test_id:45493]Should not override performance-addon-operator values", func() {
+			It("[test_id:45493]Should not override performance-addon-operator values", Label(string(label.ReleaseCritical)), func() {
 				paoValues := "{\"cpuManagerPolicy\":\"none\",\"cpuManagerReconcilePeriod\":\"10s\"}"
 				profile.Annotations = updateKubeletConfigOverrideAnnotations(profile.Annotations, paoValues)
 
