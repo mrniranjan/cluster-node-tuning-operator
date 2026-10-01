@@ -240,13 +240,28 @@ pao-functests-updating-profile: cluster-label-worker-cnf pao-functests-update-on
 # Optimized serial lane: excludes ovs-dpdk tests (45 min savings) which are telco-specific
 # opt-in features, not release-critical for general RT/performance workloads.
 # Expected runtime: ~193 min (down from 238 min, 19% reduction).
-# Further optimization possible by excluding nodeSelector tests (28440, 27484) which require
-# spare workers and are infrastructure tests, not core RT tuning (would save additional 40 min).
+# Non-critical tests moved to pao-functests-updating-nightly lane.
 .PHONY: pao-functests-update-only
 pao-functests-update-only: $(BINDATA)
 	@echo "Cluster Version"
 	hack/show-cluster-version.sh
 	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/9_reboot test/e2e/performanceprofile/functests/13_llc" -p "-v -r --label-filter='!(hypershift||ovs-dpdk)' --fail-fast --flake-attempts=2 --timeout=5h --junit-report=report.xml" -m "Running Functional Tests"
+
+.PHONY: pao-functests-updating-nightly
+pao-functests-updating-nightly: cluster-label-worker-cnf pao-functests-updating-nightly-only
+
+# Nightly lane for non-critical reboot tests excluded from the fast serial lane.
+# Runs expensive but valuable tests: ovs-dpdk (telco DPDK features), nodeSelector
+# (infrastructure/MCP retargeting), SMT housekeeping edge cases, and other Tier2
+# update tests that don't block releases but provide important regression coverage.
+# Expected runtime: ~85 min (ovs-dpdk 45m + nodeSelector 40m).
+# These tests are Tier2 - integration-level functional tests that run nightly and
+# must pass 100% but don't block fast PR feedback loops.
+.PHONY: pao-functests-updating-nightly-only
+pao-functests-updating-nightly-only: $(BINDATA)
+	@echo "Cluster Version"
+	hack/show-cluster-version.sh
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/7_performance_kubelet_node" -p "-v -r --label-filter='(ovs-dpdk||tier-2) && !hypershift && !release-critical' --flake-attempts=2 --timeout=3h --junit-report=report-nightly.xml" -m "Running Nightly Non-Critical Functional Tests"
 
 .PHONY: pao-functests-update-only-hypershift
 pao-functests-update-only-hypershift: $(BINDATA)
