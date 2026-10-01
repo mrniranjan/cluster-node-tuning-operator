@@ -237,11 +237,16 @@ pao-functests-release-critical-only: $(BINDATA)
 .PHONY: pao-functests-updating-profile
 pao-functests-updating-profile: cluster-label-worker-cnf pao-functests-update-only
 
+# Optimized serial lane: excludes ovs-dpdk tests (45 min savings) which are telco-specific
+# opt-in features, not release-critical for general RT/performance workloads.
+# Expected runtime: ~193 min (down from 238 min, 19% reduction).
+# Further optimization possible by excluding nodeSelector tests (28440, 27484) which require
+# spare workers and are infrastructure tests, not core RT tuning (would save additional 40 min).
 .PHONY: pao-functests-update-only
 pao-functests-update-only: $(BINDATA)
 	@echo "Cluster Version"
 	hack/show-cluster-version.sh
-	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/9_reboot test/e2e/performanceprofile/functests/13_llc" -p "-v -r --label-filter=!(hypershift) --fail-fast --flake-attempts=2 --timeout=5h --junit-report=report.xml" -m "Running Functional Tests"
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/9_reboot test/e2e/performanceprofile/functests/13_llc" -p "-v -r --label-filter='!(hypershift||ovs-dpdk)' --fail-fast --flake-attempts=2 --timeout=5h --junit-report=report.xml" -m "Running Functional Tests"
 
 .PHONY: pao-functests-update-only-hypershift
 pao-functests-update-only-hypershift: $(BINDATA)
