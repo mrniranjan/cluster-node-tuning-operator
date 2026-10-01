@@ -37,38 +37,39 @@ This document describes the optimized test lane structure for Performance Addon 
 
 ---
 
-### 2. **Nightly Lane** (Comprehensive) - `make pao-functests-updating-nightly`
+### 2. **Nightly Lane** (OVS-DPDK) - `make pao-functests-updating-nightly`
 
-**Purpose:** Full regression coverage for non-critical features  
-**Runtime:** ~85 minutes  
-**Trigger:** Nightly CI runs  
+**Purpose:** Telco-specific DPDK feature validation  
+**Runtime:** ~45 minutes  
+**Trigger:** Optional/informational on PRs, or periodic runs  
 
 **What it runs:**
-- ✅ ovs-dpdk tests (telco DPDK features)
-- ✅ nodeSelector tests (MCP retargeting)
-- ✅ SMT housekeeping edge cases
-- ✅ Other Tier2 update tests
-- ❌ Excludes: release-critical tests (already in fast lane)
+- ✅ ovs-dpdk tests ONLY (telco DPDK vSwitch/vRouter features)
+- ❌ Excludes: Everything else (zero overlap with fast lane)
 
 **Label filter:**
 ```bash
---label-filter='(ovs-dpdk||tier-2) && !hypershift && !release-critical'
+--label-filter='ovs-dpdk && !hypershift'
 ```
 
 **Suites:**
 - 0_config (profile setup)
-- 2_performance_update (Tier2 tests only)
-- 7_performance_kubelet_node (Tier2 kubelet annotations)
+- 2_performance_update (ovs-dpdk tests only)
 
 **Tests included:**
 | Category | Tests | Time | Description |
 |---|---|---|---|
 | ovs-dpdk | 4 specs | ~45 min | DPDK vSwitch/vRouter CPU isolation |
-| nodeSelector | 2 specs | ~40 min | MCP retargeting (needs spare workers) |
-| SMT housekeeping | 2 specs | ~13 min | Single-HT allocation edge cases |
-| Other Tier2 | ~10 specs | ~10 min | Various integration tests |
+| test_id:89987 | 1 spec | ~11 min | ovsDpdk CPU node configuration |
+| test_id:89988 | 1 spec | ~11 min | ovsdpdk.slice partition=member |
+| test_id:89994 | 1 spec | ~13 min | isolation expansion when CPUs expanded |
+| test_id:89997 | 1 spec | ~11 min | artifact cleanup when ovsDpdk removed |
 
-**Exit criteria:** Should pass 100%, but doesn't block PRs
+**NO OVERLAP:** Fast lane excludes ovs-dpdk, Nightly ONLY runs ovs-dpdk.
+
+**Exit criteria:** Should pass 100%, but doesn't block PRs (optional: true)
+
+**Version note:** Only exists in 5.0+. Remove this lane when backporting to 4.x.
 
 ---
 
@@ -204,12 +205,13 @@ make pao-functests-update-only GINKGO_LABEL_FILTER="!hypershift"
   timeout: 4h
 ```
 
-**Nightly CI (regression coverage):**
+**Nightly/Optional (ovs-dpdk regression):**
 ```yaml
 - name: e2e-gcp-pao-updating-nightly
   commands: make pao-functests-updating-nightly
+  optional: true  # Runs but doesn't block PR merge
   timeout: 2h
-  cron: "0 2 * * *"  # 2 AM daily
+  # NOTE: Remove this lane entirely when backporting to 4.x (ovs-dpdk tests don't exist)
 ```
 
 **Release Gate (pre-release validation):**
@@ -227,9 +229,11 @@ make pao-functests-update-only GINKGO_LABEL_FILTER="!hypershift"
 | Lane | Runtime | Tests | PR Blocker? | Purpose |
 |---|---|---|---|---|
 | **Fast Serial** | ~193 min | 49 | ✅ Yes | PR validation, fast feedback |
-| **Nightly** | ~85 min | ~18 | ❌ No | Tier2 regression coverage |
+| **Nightly (ovs-dpdk)** | ~45 min | 4 | ❌ No (optional) | Telco DPDK regression coverage |
 | **Release-Critical** | ~90 min | 36 | ✅ Yes (releases) | Release gating |
-| **Original** | ~238 min | 67 | N/A | Legacy (before optimization) |
+| **Original** | ~238 min | 53 | N/A | Legacy (before optimization) |
+
+**Zero Overlap:** Fast and Nightly lanes are mutually exclusive (no tests run in both).
 
 ---
 
