@@ -237,31 +237,31 @@ pao-functests-release-critical-only: $(BINDATA)
 .PHONY: pao-functests-updating-profile
 pao-functests-updating-profile: cluster-label-worker-cnf pao-functests-update-only
 
-# Optimized serial lane: excludes ovs-dpdk tests (45 min savings) which are telco-specific
-# opt-in features, not release-critical for general RT/performance workloads.
-# Expected runtime: ~193 min (down from 238 min, 19% reduction).
-# Non-critical tests moved to pao-functests-updating-nightly lane.
+# Tier-based lane: runs Tier0 and Tier1 (component-level functional) tests only.
+# Tier1 includes one critical ovs-dpdk test (test_id:89987 - basic CPU config).
+# Expected runtime: ~161 min (includes essential ovs-dpdk functionality).
+# Tier2 tests (integration-level) moved to pao-functests-tier2 lane.
 .PHONY: pao-functests-update-only
 pao-functests-update-only: $(BINDATA)
 	@echo "Cluster Version"
 	hack/show-cluster-version.sh
-	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/9_reboot test/e2e/performanceprofile/functests/13_llc" -p "-v -r --label-filter='!(hypershift||ovs-dpdk)' --fail-fast --flake-attempts=2 --timeout=5h --junit-report=report.xml" -m "Running Functional Tests"
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/1_performance test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/3_performance_status test/e2e/performanceprofile/functests/6_mustgather_testing test/e2e/performanceprofile/functests/7_performance_kubelet_node test/e2e/performanceprofile/functests/9_reboot test/e2e/performanceprofile/functests/10_performance_ppc test/e2e/performanceprofile/functests/11_mixedcpus test/e2e/performanceprofile/functests/13_llc" -p "-v -r --label-filter='(tier-0||tier-1) && !hypershift' --fail-fast --flake-attempts=2 --timeout=4h --junit-report=report.xml" -m "Running Tier0/Tier1 Functional Tests"
 
-.PHONY: pao-functests-updating-nightly
-pao-functests-updating-nightly: cluster-label-worker-cnf pao-functests-updating-nightly-only
+.PHONY: pao-functests-tier2
+pao-functests-tier2: cluster-label-worker-cnf pao-functests-tier2-only
 
-# Nightly lane for ovs-dpdk tests excluded from the fast serial lane.
-# Runs only ovs-dpdk tests (telco DPDK vSwitch/vRouter features) which are
-# opt-in, non-default features not critical for general RT/performance releases.
-# Expected runtime: ~45 min (4 ovs-dpdk tests).
-# NOTE: This lane only exists in 5.0+. For backports to 4.x, remove this target
-# entirely as ovs-dpdk tests do not exist in those versions.
-# NO OVERLAP with fast lane: Fast runs !(ovs-dpdk), Nightly runs ONLY ovs-dpdk.
-.PHONY: pao-functests-updating-nightly-only
-pao-functests-updating-nightly-only: $(BINDATA)
+# Tier2 lane for integration-level functional tests.
+# Runs all Tier2 tests except release-critical (those run in Tier1 lane).
+# Includes: ovs-dpdk lifecycle tests, nodeSelector, SMT housekeeping, etc.
+# Expected runtime: ~85 min.
+# NOTE: For backports to 4.x, remove this target entirely as most Tier2
+# tests (especially ovs-dpdk) do not exist in those versions.
+# NO OVERLAP with Tier1 lane: Tier1=(tier-0||tier-1), Tier2=(tier-2).
+.PHONY: pao-functests-tier2-only
+pao-functests-tier2-only: $(BINDATA)
 	@echo "Cluster Version"
 	hack/show-cluster-version.sh
-	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update" -p "-v -r --label-filter='ovs-dpdk && !hypershift' --flake-attempts=2 --timeout=2h --junit-report=report-nightly.xml" -m "Running Nightly OVS-DPDK Tests"
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/7_performance_kubelet_node" -p "-v -r --label-filter='tier-2 && !hypershift && !release-critical' --flake-attempts=2 --timeout=2h --junit-report=report-tier2.xml" -m "Running Tier2 Integration Tests"
 
 .PHONY: pao-functests-update-only-hypershift
 pao-functests-update-only-hypershift: $(BINDATA)

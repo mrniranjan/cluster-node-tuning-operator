@@ -135,7 +135,7 @@ var _ = Describe("[performance] ovsDpdk CPUs", Ordered, Label(string(label.OvsDp
 	})
 
 	Context("when ovsDpdk CPUs and cpu-load-balancing-ovs-dpdk annotation are set", func() {
-		It("should apply ovsDpdk CPU node configuration", func() {
+		It("should apply ovsDpdk CPU node configuration", Label(string(label.Tier1)), func() {
 			ctx := context.TODO()
 			expectedIsolatedPlusOvsDpdk := newIsolatedSet.Union(ovsDpdkSet)
 			expectedReservedSystem := reservedSet.Union(ovsDpdkSet)
