@@ -6,70 +6,80 @@ This document describes the optimized test lane structure for Performance Addon 
 
 ## Lane Structure
 
-### 1. **Fast Serial Lane** (PR CI) - `make pao-functests-updating-profile`
+### 1. **Tier1 Lane** (PR CI) - `make pao-functests-updating-profile`
 
-**Purpose:** Fast feedback loop for PR validation  
-**Runtime:** ~193 minutes (down from 238 min)  
+**Purpose:** Component-level functional test validation (Tier0 + Tier1)  
+**Runtime:** ~161 minutes  
 **Trigger:** PR CI runs  
 
 **What it runs:**
-- ✅ All release-critical tests (P0/P1)
+- ✅ All Tier0 tests (smoke/sanity)
+- ✅ All Tier1 tests (component functional)
+- ✅ Release-critical tests (P0/P1)
 - ✅ Core RT kernel tuning validation
 - ✅ CPU isolation, hugepages, kubelet config
-- ✅ Status/Degraded propagation
-- ✅ OVS dynamic pinning
-- ❌ Excludes: ovs-dpdk tests (non-critical, telco-specific)
+- ✅ **Critical ovsDpdk test** (test_id:89987 - basic CPU config)
+- ✅ OVS dynamic pinning, Tier1 reboot test
+- ❌ Excludes: Tier2 tests (integration-level)
 
 **Label filter:**
 ```bash
---label-filter='!(hypershift||ovs-dpdk)'
+--label-filter='(tier-0||tier-1) && !hypershift'
 ```
 
 **Suites:**
 - 0_config (13 min)
-- 2_performance_update (157 min, without ovs-dpdk)
-- 3_performance_status (1.6 min)
-- 7_performance_kubelet_node (21.6 min)
+- 1_performance (Tier0/Tier1 tests)
+- 2_performance_update (Tier1 tests, includes test_id:89987)
+- 3_performance_status (Tier1 status checks)
+- 6_mustgather_testing (Tier1)
+- 7_performance_kubelet_node (Tier1)
 - 9_reboot (skipped on 4-CPU VMs)
-- 13_llc (partial, config only)
+- 10_performance_ppc (Tier1)
+- 11_mixedcpus (Tier1)
+- 13_llc (Tier1)
 
 **Exit criteria:** Must pass 100% for PR merge
 
 ---
 
-### 2. **Nightly Lane** (OVS-DPDK) - `make pao-functests-updating-nightly`
+### 2. **Tier2 Lane** (Integration) - `make pao-functests-tier2`
 
-**Purpose:** Telco-specific DPDK feature validation  
-**Runtime:** ~45 minutes  
+**Purpose:** Integration-level functional test validation  
+**Runtime:** ~85 minutes  
 **Trigger:** Optional/informational on PRs, or periodic runs  
 
 **What it runs:**
-- ✅ ovs-dpdk tests ONLY (telco DPDK vSwitch/vRouter features)
-- ❌ Excludes: Everything else (zero overlap with fast lane)
+- ✅ All Tier2 tests (integration-level)
+- ✅ ovs-dpdk lifecycle tests (10 tests, excluding basic config which is Tier1)
+- ✅ nodeSelector tests (MCP retargeting)
+- ✅ SMT housekeeping edge cases
+- ✅ Other integration scenarios
+- ❌ Excludes: Release-critical tests (those run in Tier1 lane)
 
 **Label filter:**
 ```bash
---label-filter='ovs-dpdk && !hypershift'
+--label-filter='tier-2 && !hypershift && !release-critical'
 ```
 
 **Suites:**
 - 0_config (profile setup)
-- 2_performance_update (ovs-dpdk tests only)
+- 2_performance_update (Tier2 tests)
+- 7_performance_kubelet_node (Tier2 tests)
 
 **Tests included:**
 | Category | Tests | Time | Description |
 |---|---|---|---|
-| ovs-dpdk | 4 specs | ~45 min | DPDK vSwitch/vRouter CPU isolation |
-| test_id:89987 | 1 spec | ~11 min | ovsDpdk CPU node configuration |
-| test_id:89988 | 1 spec | ~11 min | ovsdpdk.slice partition=member |
-| test_id:89994 | 1 spec | ~13 min | isolation expansion when CPUs expanded |
-| test_id:89997 | 1 spec | ~11 min | artifact cleanup when ovsDpdk removed |
+| ovs-dpdk lifecycle | 10 specs | ~74 min | Lifecycle, integration, cleanup scenarios |
+| nodeSelector | 2 specs | ~40 min | MCP retargeting (test_id:28440, 27484) |
+| SMT housekeeping | 2 specs | ~13 min | Single-HT allocation edge cases |
+| Other Tier2 | ~10 specs | ~10 min | Various integration tests |
 
-**NO OVERLAP:** Fast lane excludes ovs-dpdk, Nightly ONLY runs ovs-dpdk.
+**NO OVERLAP:** Tier1=(tier-0||tier-1), Tier2=(tier-2). Mutually exclusive.
 
 **Exit criteria:** Should pass 100%, but doesn't block PRs (optional: true)
 
-**Version note:** Only exists in 5.0+. Remove this lane when backporting to 4.x.
+**Version note:** For backports to 4.x, remove this target (most Tier2 tests don't exist).
 
 ---
 
@@ -198,20 +208,20 @@ make pao-functests-update-only GINKGO_LABEL_FILTER="!hypershift"
 
 ### Recommended CI Lane Setup
 
-**PR CI (required for merge):**
+**PR CI (required for merge - Tier1):**
 ```yaml
-- name: e2e-gcp-pao-updating-profile
+- name: e2e-gcp-pao-tier1
   commands: make pao-functests-updating-profile
   timeout: 4h
 ```
 
-**Nightly/Optional (ovs-dpdk regression):**
+**Optional/Informational (Tier2 integration):**
 ```yaml
-- name: e2e-gcp-pao-updating-nightly
-  commands: make pao-functests-updating-nightly
+- name: e2e-gcp-pao-tier2
+  commands: make pao-functests-tier2
   optional: true  # Runs but doesn't block PR merge
   timeout: 2h
-  # NOTE: Remove this lane entirely when backporting to 4.x (ovs-dpdk tests don't exist)
+  # NOTE: Remove this lane entirely when backporting to 4.x (most Tier2 tests don't exist)
 ```
 
 **Release Gate (pre-release validation):**
@@ -228,12 +238,17 @@ make pao-functests-update-only GINKGO_LABEL_FILTER="!hypershift"
 
 | Lane | Runtime | Tests | PR Blocker? | Purpose |
 |---|---|---|---|---|
-| **Fast Serial** | ~193 min | 49 | ✅ Yes | PR validation, fast feedback |
-| **Nightly (ovs-dpdk)** | ~45 min | 4 | ❌ No (optional) | Telco DPDK regression coverage |
-| **Release-Critical** | ~90 min | 36 | ✅ Yes (releases) | Release gating |
+| **Tier1** | ~161 min | ~52 | ✅ Yes | Component functional (Tier0+Tier1) |
+| **Tier2** | ~85 min | ~25 | ❌ No (optional) | Integration-level (Tier2) |
+| **Release-Critical** | ~90 min | 36 | ✅ Yes (releases) | Release gating (cross-tier P0/P1) |
 | **Original** | ~238 min | 53 | N/A | Legacy (before optimization) |
 
-**Zero Overlap:** Fast and Nightly lanes are mutually exclusive (no tests run in both).
+**Zero Overlap:** Tier1 and Tier2 lanes are mutually exclusive (tier-based, no tests run in both).
+
+**Tier semantic:**
+- **Tier0:** Unit/smoke tests (minimal time, 100% automated)
+- **Tier1:** Component-level functional (includes critical ovsDpdk test_id:89987)
+- **Tier2:** Integration-level functional (lifecycle, multi-component scenarios)
 
 ---
 
