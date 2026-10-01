@@ -250,18 +250,18 @@ pao-functests-update-only: $(BINDATA)
 .PHONY: pao-functests-updating-nightly
 pao-functests-updating-nightly: cluster-label-worker-cnf pao-functests-updating-nightly-only
 
-# Nightly lane for non-critical reboot tests excluded from the fast serial lane.
-# Runs expensive but valuable tests: ovs-dpdk (telco DPDK features), nodeSelector
-# (infrastructure/MCP retargeting), SMT housekeeping edge cases, and other Tier2
-# update tests that don't block releases but provide important regression coverage.
-# Expected runtime: ~85 min (ovs-dpdk 45m + nodeSelector 40m).
-# These tests are Tier2 - integration-level functional tests that run nightly and
-# must pass 100% but don't block fast PR feedback loops.
+# Nightly lane for ovs-dpdk tests excluded from the fast serial lane.
+# Runs only ovs-dpdk tests (telco DPDK vSwitch/vRouter features) which are
+# opt-in, non-default features not critical for general RT/performance releases.
+# Expected runtime: ~45 min (4 ovs-dpdk tests).
+# NOTE: This lane only exists in 5.0+. For backports to 4.x, remove this target
+# entirely as ovs-dpdk tests do not exist in those versions.
+# NO OVERLAP with fast lane: Fast runs !(ovs-dpdk), Nightly runs ONLY ovs-dpdk.
 .PHONY: pao-functests-updating-nightly-only
 pao-functests-updating-nightly-only: $(BINDATA)
 	@echo "Cluster Version"
 	hack/show-cluster-version.sh
-	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update test/e2e/performanceprofile/functests/7_performance_kubelet_node" -p "-v -r --label-filter='(ovs-dpdk||tier-2) && !hypershift && !release-critical' --flake-attempts=2 --timeout=3h --junit-report=report-nightly.xml" -m "Running Nightly Non-Critical Functional Tests"
+	hack/run-test.sh -t "test/e2e/performanceprofile/functests/0_config test/e2e/performanceprofile/functests/2_performance_update" -p "-v -r --label-filter='ovs-dpdk && !hypershift' --flake-attempts=2 --timeout=2h --junit-report=report-nightly.xml" -m "Running Nightly OVS-DPDK Tests"
 
 .PHONY: pao-functests-update-only-hypershift
 pao-functests-update-only-hypershift: $(BINDATA)
